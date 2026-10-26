@@ -32,7 +32,8 @@ def check():
             '-F', 'priority=BALANCED', '-F', 'layerHeightMm=0.20', '-F', 'minimumInfillPercent=15',
             '-F', 'minimumPerimeters=2', '-F', 'supportMode=AUTO', '-F', 'maxPrintTimeMin=0',
             '-F', 'maxMaterialConsumptionG=0', 'http://slicer-proxy:8080/api/print-plans/analyze-stl']
-    result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=220, check=True)
+    result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, timeout=220, check=True)
     body = json.loads(result.stdout)
     baseline = next(c for c in body['candidates'] if c['infillPercent'] == 15
                     and c['perimeters'] == 2 and c['layerHeightMm'] == .20)
