@@ -3,13 +3,14 @@ package ru.printlab.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import ru.printlab.common.Money;
+import ru.printlab.operator.OperatorProperties;
 
 import java.math.BigDecimal;
 import java.time.Clock;
 
 @Configuration
 public class RuntimeConfig {
-    public RuntimeConfig(AppProperties properties) {
+    public RuntimeConfig(AppProperties properties, OperatorProperties operators) {
         CostRates rates = properties.rates();
         Money.nonNegative(rates.electricityPerKwh(), "Электроэнергия");
         Money.nonNegative(rates.printerKw(), "Мощность");
@@ -74,10 +75,14 @@ public class RuntimeConfig {
         }
         if (properties.botEnabled()) {
             if (properties.demoMode() || !properties.pricingConfirmed() || properties.botToken().isBlank()
-                    || properties.adminIds().isEmpty() || properties.adminIds().contains(0L)
-                    || properties.contact().isBlank() || !properties.termsUrl().startsWith("https://")
-                    || !properties.privacyUrl().startsWith("https://") || properties.paymentInstructions().isBlank()) {
-                throw new IllegalStateException("Для бота настройте токен, admin IDs, тарифы, контакты, ссылки на условия и оплату; demo должен быть выключен");
+                    || (properties.adminIds().isEmpty() && operators.adminUsernames().isEmpty()) || properties.adminIds().contains(0L)
+                    || properties.contact().isBlank() || properties.paymentInstructions().isBlank()) {
+                throw new IllegalStateException("Для бота настройте токен, операторов, тарифы, контакты и оплату; demo должен быть выключен");
+            }
+            for (String url : java.util.List.of(properties.termsUrl(), properties.privacyUrl())) {
+                if (!url.isBlank() && !url.startsWith("https://")) {
+                    throw new IllegalStateException("Ссылки на условия и обработку данных должны использовать HTTPS");
+                }
             }
         }
     }

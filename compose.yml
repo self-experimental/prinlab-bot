@@ -29,9 +29,6 @@ services:
       MODEL_STORAGE_DIR: /app/data/models
       SLICER_PROFILES_DIR: /app/config/slicer/a1-mini
       SLICER_WORK_DIR: /app/data/slicing
-      # Текущий запуск на VPS: расчёт в Bambu Studio выполняет оператор.
-      SLICER_ENABLED: "false"
-      SLICER_PROFILE_CONFIRMED: "false"
     volumes:
       - bot-data:/app/data
     depends_on:

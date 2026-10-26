@@ -3,7 +3,7 @@ package ru.printlab.order;
 import ru.printlab.common.BusinessException;
 
 public enum OrderStatus {
-    DRAFT("Черновик"), ESTIMATING("Проверяем модель"), REVIEW_REQUIRED("Согласование оператором"),
+    DRAFT("Черновик"), MODELING("Моделирование по фото"), ESTIMATING("Проверяем модель"), REVIEW_REQUIRED("Согласование оператором"),
     QUOTE_READY("Цена готова"), AWAITING_PAYMENT("Ожидаем оплату"), PAID("Оплачен"),
     PRINTING("Печатается"), QUALITY_CHECK("Проверяем качество"), READY("Готов к выдаче"),
     COMPLETED("Выдан"), CANCELLED("Отменён"), EXPIRED("Предложение истекло"), REFUNDED("Деньги возвращены");

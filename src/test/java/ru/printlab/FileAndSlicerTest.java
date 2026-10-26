@@ -8,6 +8,18 @@ import ru.printlab.order.PrintOrder;
 import ru.printlab.slicing.GcodeEstimateParser;
 import ru.printlab.slicing.CliSlicingEngine;
 import ru.printlab.slicing.SlicerProperties;
+import ru.printlab.slicing.BackendSlicerProperties;
+import ru.printlab.slicing.BackendSlicingEngine;
+import ru.printlab.slicing.RetryableSlicingException;
+import ru.printlab.slicing.SliceJob;
+import ru.printlab.common.Json;
+import tools.jackson.databind.json.JsonMapper;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import ru.printlab.storage.StlValidator;
 import ru.printlab.storage.ModelStorage;
 import ru.printlab.config.AppProperties;
@@ -91,7 +103,7 @@ class FileAndSlicerTest {
     }
 
     @Test
-    void passesQuantityAndAbsolutePathsAsSeparateProcessArguments() {
+    void passesQuantityAndAbsolutePathsAsSeparateProcessArguments() throws Exception {
         SlicerProperties config = new SlicerProperties(false, false, "/opt/orca slicer", directory,
                 directory, "test", 180, Map.of("pla-black", "pla.json"));
         CliSlicingEngine engine = new CliSlicingEngine(config, null, parser);
@@ -101,6 +113,54 @@ class FileAndSlicerTest {
         assertThat(args).containsSubsequence("--clone-objects", "5");
         assertThat(args).containsSubsequence("--slice", "0");
         assertThat(args).doesNotContain("--scale", "--convert-unit", "--export-3mf", "sh", "-c");
+
+        AtomicInteger status = new AtomicInteger(200);
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        AtomicReference<String> responseBody = new AtomicReference<>("""
+                {"printerName":"Bambu Lab A1 mini","nozzleDiameterMm":0.4,"engineVersion":"02.08.02.61",
+                 "selectedCandidateId":"other","candidates":[
+                  {"id":"other","infillPercent":40,"perimeters":3,"layerHeightMm":0.08,
+                   "meetsConstraints":true,"estimatedMaterialG":1,"estimatedPrintTimeMin":1},
+                  {"id":"requested","infillPercent":30,"perimeters":2,"layerHeightMm":0.12,
+                   "meetsConstraints":true,"estimatedMaterialG":3.5,"estimatedPrintTimeMin":12.5}],"warnings":[]}
+                """);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/analyze-stl", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = responseBody.get().getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(status.get(), response.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(response);
+            }
+        });
+        server.start();
+        try {
+            AppProperties app = new AppProperties(true, false, "", Set.of(), directory, false,
+                    null, null, Map.of(), "", "", "", "");
+            var model = new ModelStorage(app, validator).save(order.customerId(), "test", "part.stl", Fixtures.stl());
+            URI url = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/analyze-stl");
+            var backend = new BackendSlicerProperties(url, Map.of("pla-black", "prusament-pla"));
+            var remote = new BackendSlicingEngine(backend, config, app, new Json(JsonMapper.builder().build()));
+            SliceJob job = new SliceJob(UUID.randomUUID(), order.id(), 0);
+            var result = remote.slice(job, order, model);
+            assertThat(result.estimate().grams()).isEqualByComparingTo("17.5");
+            assertThat(result.estimate().printMinutes()).isEqualByComparingTo("62.5");
+            assertThat(result.estimate().plateCount()).isEqualTo(5);
+            assertThat(result.provenance()).contains("candidate=requested", "quantity=5", "one-item-per-plate", model.sha256());
+            assertThat(requestBody.get()).contains("name=\"minimumInfillPercent\"\r\n\r\n30",
+                    "name=\"layerHeightMm\"\r\n\r\n0.12", "prusament-pla", "name=\"supportMode\"\r\n\r\nAUTO");
+            status.set(429);
+            assertThatThrownBy(() -> remote.slice(job, order, model)).isInstanceOf(RetryableSlicingException.class);
+            status.set(200);
+            responseBody.set(responseBody.get().replace("\"infillPercent\":30", "\"infillPercent\":60"));
+            assertThatThrownBy(() -> remote.slice(job, order, model)).isInstanceOf(ru.printlab.common.BusinessException.class)
+                    .hasMessageContaining("выбранные слой и заполнение");
+            responseBody.set("{\"printerName\":\"Other printer\"}");
+            assertThatThrownBy(() -> remote.slice(job, order, model)).isInstanceOf(ru.printlab.common.BusinessException.class)
+                    .hasMessageContaining("A1 mini");
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test

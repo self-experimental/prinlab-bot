@@ -8,3 +8,5 @@
 !Dockerfile
 !config/
 !config/**
+!deploy/
+!deploy/stepped-block.stl

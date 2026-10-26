@@ -32,6 +32,7 @@ import static org.mockito.Mockito.*;
 @SpringBootTest
 @ActiveProfiles("test")
 @Import(TestClockConfig.class)
+@org.springframework.test.context.TestPropertySource(properties = "printlab.operations.admin-usernames=oilbanana,muslimitsuhide")
 class WorkflowTest {
     @Autowired OrderService service;
     @Autowired OrderDao orders;
@@ -50,10 +51,12 @@ class WorkflowTest {
     @BeforeEach
     void prepare() {
         for (String table : List.of("outbox", "order_actuals", "order_events", "payments", "promotion_reservations",
-                "slicing_jobs", "quotes", "orders", "model_files", "customers")) {
+                "slicing_jobs", "quotes", "modeling_photos", "orders", "model_files", "customers")) {
             jdbc.sql("DELETE FROM " + table).update();
         }
         jdbc.sql("UPDATE bot_cursor SET next_update = 0").update();
+        jdbc.sql("DELETE FROM operator_accounts").update();
+        jdbc.sql("UPDATE operator_chat SET telegram_chat_id = NULL").update();
         clock.set(Instant.parse("2026-10-23T12:00:00Z"));
         updateId = 1;
         send(111, "/start");
@@ -64,7 +67,26 @@ class WorkflowTest {
     void fullCustomerBotFlowThroughPaymentProductionAndActualCosts() {
         send(222, "/start card01");
         click(222, "agree");
-        processor.process(update(222, Map.of("document", Map.of("file_id", "stl-file", "file_name", "part.stl", "file_size", 134))));
+        send(222, "/model");
+        JsonNode photo = update(222, Map.of("photo", List.of(
+                Map.of("file_id", "small-photo", "width", 100, "height", 100),
+                Map.of("file_id", "large-photo", "width", 1000, "height", 1000)), "caption", "Корпус 30×40 мм"));
+        processor.process(photo);
+        processor.process(photo);
+        assertThat(count("modeling_photos")).isEqualTo(1);
+        assertThat(count("slicing_jobs")).isZero();
+        assertThat(jdbc.sql("SELECT telegram_file_id FROM modeling_photos").query(String.class).single()).isEqualTo("large-photo");
+        PrintOrder request = orders.list(222, false).getFirst();
+        assertThat(request.status()).isEqualTo(OrderStatus.MODELING);
+        send(222, "Высота 10 мм, нужен PLA");
+        send(111, "/model_reply " + request.number() + " Стоимость моделирования согласуем отдельно");
+        assertThat(customerMessages(222)).contains("Стоимость моделирования согласуем отдельно");
+        processor.process(update(333, Map.of("document", Map.of("file_id", "stl-file", "file_name", "part.stl"),
+                "caption", "/model_stl " + request.number())));
+        assertThat(orders.get(request.id()).status()).isEqualTo(OrderStatus.MODELING);
+        processor.process(update(111, Map.of("document", Map.of("file_id", "stl-file", "file_name", "part.stl", "file_size", 134),
+                "caption", "/model_stl " + request.number())));
+        assertThat(orders.get(request.id()).status()).isEqualTo(OrderStatus.DRAFT);
         PrintOrder draft = orders.draft(222);
         assertThat(draft.customerId()).isEqualTo(orders.customerId(222));
         assertThat(draft.customerId()).isInstanceOf(UUID.class);
@@ -77,7 +99,7 @@ class WorkflowTest {
         assertThat(count("slicing_jobs")).isZero();
         assertThat(customerMessages(222)).contains("Оператор рассчитает печать");
         assertThat(jdbc.sql("SELECT COUNT(*) FROM outbox WHERE method = 'sendDocument'")
-                .query(Long.class).single()).isEqualTo(1L);
+                .query(Long.class).single()).isEqualTo(2L);
         send(111, "/slice " + draft.number() + " 75 210 10 10 0 0 0");
         assertThat(orders.quote(orders.get(draft.id()).quoteId()).snapshot().estimate().setupMinutes())
                 .isEqualByComparingTo("10");
@@ -137,6 +159,12 @@ class WorkflowTest {
         send(222, "/quantity -1");
         send(222, "/quantity 3");
         assertThat(orders.draft(222).quantity()).isEqualTo(3);
+        processor.process(update(222, Map.of("document", Map.of("file_id", "reference-png", "file_name", "reference.PNG", "file_size", 100))));
+        PrintOrder request = orders.list(222, false).getFirst();
+        assertThat(request.status()).isEqualTo(OrderStatus.MODELING);
+        assertThat(orders.draft(222).quantity()).isEqualTo(3);
+        send(222, "/cancel " + request.number());
+        assertThat(orders.get(request.id()).status()).isEqualTo(OrderStatus.CANCELLED);
     }
 
     @Test
@@ -148,6 +176,27 @@ class WorkflowTest {
         send(222, "/paid " + order.number() + " 1 forged");
         assertThat(count("payments")).isZero();
         assertThat(orders.get(order.id()).status()).isEqualTo(OrderStatus.ESTIMATING);
+        JsonNode enroll = update(444, Map.of("text", "/start"));
+        var enrolled = (tools.jackson.databind.node.ObjectNode) enroll.path("message").path("from");
+        enrolled.put("username", "Oilbanana");
+        processor.process(enroll);
+        assertThat(service.isAdmin(444)).isTrue();
+        JsonNode reusedName = update(555, Map.of("text", "/start"));
+        ((tools.jackson.databind.node.ObjectNode) reusedName.path("message").path("from")).put("username", "oilbanana");
+        processor.process(reusedName);
+        assertThat(service.isAdmin(555)).isFalse();
+        Map<String, Object> group = Map.of("chat", Map.of("id", -12345, "type", "supergroup"),
+                "from", Map.of("id", 444, "username", "oilbanana"), "text", "/operator_chat@printlab3dbot");
+        processor.process(json.read(json.write(Map.of("update_id", updateId++, "message", group)), JsonNode.class));
+        assertThat(jdbc.sql("SELECT telegram_chat_id FROM operator_chat").query(Long.class).single()).isEqualTo(-12345);
+        Map<String, Object> unauthorizedGroup = Map.of("chat", Map.of("id", -999, "type", "group"),
+                "from", Map.of("id", 555, "username", "oilbanana"), "text", "/operator_chat");
+        processor.process(json.read(json.write(Map.of("update_id", updateId++, "message", unauthorizedGroup)), JsonNode.class));
+        assertThat(jdbc.sql("SELECT telegram_chat_id FROM operator_chat").query(Long.class).single()).isEqualTo(-12345);
+        click(333, "agree");
+        processor.process(update(333, Map.of("photo", List.of(Map.of("file_id", "group-photo", "width", 100, "height", 100)))));
+        String payload = jdbc.sql("SELECT payload FROM outbox WHERE method = 'sendPhoto'").query(String.class).single();
+        assertThat(json.read(payload, JsonNode.class).path("chat_id").asLong()).isEqualTo(-12345);
     }
 
     @Test
@@ -243,6 +292,18 @@ class WorkflowTest {
         slicing.complete(job, result);
         assertThat(orders.get(order.id()).status()).isEqualTo(OrderStatus.QUOTE_READY);
         assertThat(count("quotes")).isEqualTo(1);
+        PrintOrder retry = submitted(444, false);
+        jobs.enqueue(retry.id(), clock.instant());
+        SliceJob busy = slicing.claim();
+        slicing.retry(busy, "Busy");
+        assertThat(slicing.claim()).isNull();
+        clock.set(clock.instant().plusSeconds(31));
+        SliceJob repeated = slicing.claim();
+        assertThat(repeated.id()).isEqualTo(busy.id());
+        slicing.retry(repeated, "Busy");
+        clock.set(clock.instant().plusSeconds(31));
+        slicing.retry(slicing.claim(), "Busy");
+        assertThat(jdbc.sql("SELECT state FROM slicing_jobs WHERE id = ?").param(busy.id()).query(String.class).single()).isEqualTo("FAILED");
         slicing.complete(job, result);
         assertThat(count("quotes")).isEqualTo(1);
         PrintOrder cancelled = submitted(333, false);

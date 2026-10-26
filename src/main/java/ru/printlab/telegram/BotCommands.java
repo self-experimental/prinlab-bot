@@ -22,7 +22,7 @@ import java.util.UUID;
 @Component
 public class BotCommands {
     private static final Set<String> ADMIN_COMMANDS = Set.of("/admin", "/slice", "/approve", "/paid", "/status",
-            "/refund", "/actual", "/report", "/retry_notifications", "/reslice");
+            "/refund", "/actual", "/report", "/retry_notifications", "/reslice", "/model_reply");
     private final OrderService service;
     private final OrderDao orders;
     private final AccountingService accounting;
@@ -31,9 +31,11 @@ public class BotCommands {
     private final TelegramGateway telegram;
     private final AppProperties properties;
     private final Clock clock;
+    private final ModelingService modeling;
 
     public BotCommands(OrderService service, OrderDao orders, AccountingService accounting, Notifications messages,
-                       OutboxDao outbox, TelegramGateway telegram, AppProperties properties, Clock clock) {
+                       OutboxDao outbox, TelegramGateway telegram, AppProperties properties, Clock clock,
+                       ModelingService modeling) {
         this.service = service;
         this.orders = orders;
         this.accounting = accounting;
@@ -42,6 +44,7 @@ public class BotCommands {
         this.telegram = telegram;
         this.properties = properties;
         this.clock = clock;
+        this.modeling = modeling;
     }
 
     public void handle(long user, JsonNode message, String callback) {
@@ -51,7 +54,18 @@ public class BotCommands {
                 return;
             }
             if (message.has("document")) {
-                document(user, message.path("document"));
+                document(user, message.path("document"), message.path("caption").asText(""));
+                return;
+            }
+            if (message.path("photo").isArray() && !message.path("photo").isEmpty()) {
+                JsonNode largest = message.path("photo").get(0);
+                for (JsonNode photo : message.path("photo")) {
+                    if (photo.path("width").asLong() * photo.path("height").asLong()
+                            > largest.path("width").asLong() * largest.path("height").asLong()) {
+                        largest = photo;
+                    }
+                }
+                modeling.photo(user, largest.path("file_id").asText(""), false, message.path("caption").asText(""));
                 return;
             }
             String text = message.path("text").asText("").trim();
@@ -66,7 +80,13 @@ public class BotCommands {
             }
             switch (command) {
                 case "/start", "/terms" -> welcome(user);
-                case "/help" -> messages.text(user, "/new — новый заказ\n/draft — продолжить черновик\n/orders — мои заказы\n/order НОМЕР — детали\n/quantity 3 — количество в черновике\n/promo FIRST50 — промокод\n/promo - — убрать промокод\n/cancel НОМЕР — отмена до оплаты\n/terms — условия\n/id — мои идентификаторы\nПоддержка: " + properties.contact());
+                case "/help" -> messages.text(user, "/new — печать по STL\n/model — моделирование по фото (вручную)\n/draft — продолжить черновик\n/orders — мои заказы\n/order НОМЕР — детали\n/quantity 3 — количество в черновике\n/promo FIRST50 — промокод\n/promo - — убрать промокод\n/cancel НОМЕР — отмена до оплаты\n/terms — условия\n/id — мои идентификаторы\nПоддержка: " + properties.contact());
+                case "/model" -> {
+                    PrintOrder request = modeling.request(user);
+                    messages.text(user, "Заявка на моделирование №" + request.number()
+                            + ". Пришлите фото или JPG/PNG как файл. В подписи укажите размеры и назначение детали."
+                            + " Оператор обработает заявку вручную и согласует стоимость.");
+                }
                 case "/id" -> messages.text(user, "User UUID: " + orders.customerId(user) + "\nTelegram ID: " + user);
                 case "/new", "/draft" -> draft(user, service.newDraft(user));
                 case "/orders" -> list(user);
@@ -74,7 +94,11 @@ public class BotCommands {
                 case "/cancel" -> service.cancel(user, orders.byNumber(number(args, 1)).id());
                 case "/quantity" -> draft(user, service.configure(user, service.newDraft(user).id(), "quantity", argument(args, 1)));
                 case "/promo" -> draft(user, service.configure(user, service.newDraft(user).id(), "promo", argument(args, 1)));
-                default -> messages.text(user, "Чтобы заказать печать, нажмите /new. Список команд: /help.");
+                default -> {
+                    if (text.startsWith("/") || !modeling.describe(user, text)) {
+                        messages.text(user, "Печать по STL: /new. Моделирование по фото: /model. Список команд: /help.");
+                    }
+                }
             }
         } catch (IllegalArgumentException exception) {
             throw new BusinessException("Неверный формат команды или числа. Подсказка: /help, для оператора /admin.");
@@ -83,10 +107,18 @@ public class BotCommands {
 
     private void welcome(long user) {
         String text = "PrintLab — печать по вашей 3D-модели.\nЗагрузите STL, выберите материал и параметры."
+                + "\nНет модели? Пришлите фото — мы обработаем заявку на моделирование вручную. Команда: /model."
                 + "\nПринтер Bambu Lab A1 mini: до 180×180×180 мм, один материал и один цвет на заказ. Многоцветная печать пока недоступна."
                 + "\nМодели принимаются в миллиметрах; размер проверяется при слайсинге."
-                + "\nУсловия заказа: " + properties.termsUrl() + "\nОбработка данных: " + properties.privacyUrl()
+                + "\nПеред оплатой согласуем цену и срок. Платёж подтверждает оператор."
+                + "\nФото, модели и описание заявки передаются операторам для обработки заказа."
                 + "\nКонтакт: " + properties.contact();
+        if (!properties.termsUrl().isBlank()) {
+            text += "\nУсловия заказа: " + properties.termsUrl();
+        }
+        if (!properties.privacyUrl().isBlank()) {
+            text += "\nОбработка данных: " + properties.privacyUrl();
+        }
         text += "\nЗапуск: " + Money.format(properties.rates().launchFee());
         if (properties.rates().launchFeePerOrder()) {
             text += " на заказ.";
@@ -107,11 +139,24 @@ public class BotCommands {
                 Notifications.button("Мои заказы", "orders")));
     }
 
-    private void document(long user, JsonNode file) {
-        service.newDraft(user);
+    private void document(long user, JsonNode file, String caption) {
         String name = file.path("file_name").asText("");
+        String lowerName = name.toLowerCase(Locale.ROOT);
+        if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg") || lowerName.endsWith(".png")) {
+            if (file.path("file_size").asLong() > StlValidator.MAX_BYTES) {
+                throw new BusinessException("Изображение должно быть до 20 МиБ.");
+            }
+            modeling.photo(user, file.path("file_id").asText(""), true, caption);
+            return;
+        }
+        boolean modeled = caption.trim().startsWith("/model_stl");
+        if (modeled) {
+            service.requireAdmin(user);
+        } else {
+            service.newDraft(user);
+        }
         if (!name.toLowerCase(Locale.ROOT).endsWith(".stl") || file.path("file_size").asLong() > StlValidator.MAX_BYTES) {
-            throw new BusinessException("Пришлите STL размером до 20 МиБ.");
+            throw new BusinessException("Пришлите STL для печати или фото/JPG/PNG для моделирования, до 20 МиБ.");
         }
         String fileId = file.path("file_id").asText();
         byte[] bytes;
@@ -122,6 +167,15 @@ public class BotCommands {
                 throw new BusinessException("Telegram не отдал файл. Пришлите STL повторно или свяжитесь с оператором.");
             }
             throw failure;
+        }
+        if (modeled) {
+            String[] args = caption.trim().split("\\s+");
+            if (args.length != 2 || !args[0].equals("/model_stl")) {
+                throw new BusinessException("Подпись готового STL: /model_stl НОМЕР.");
+            }
+            PrintOrder order = modeling.attach(user, number(args, 1), fileId, name, bytes);
+            messages.text(user, "Модель передана клиенту в заказ №" + order.number() + ".");
+            return;
         }
         PrintOrder order = service.attach(user, fileId, name, bytes);
         materialMenu(user, order);
@@ -234,6 +288,9 @@ public class BotCommands {
             service.owned(user, order.id());
         }
         messages.text(user, "Заказ №" + number + " · " + order.status().label() + "\n" + service.summary(order));
+        if (service.isAdmin(user)) {
+            modeling.show(user, order);
+        }
         if (order.quoteId() != null) {
             Quote quote = orders.quote(order.quoteId());
             if (service.isAdmin(user)) {
@@ -258,6 +315,9 @@ public class BotCommands {
                     + "/refund НОМЕР идентификаторВозврата — после полного возврата денег\n"
                     + "/actual НОМЕР граммы минутыПечати подготовкаМин обработкаМин отходыГ себестДоставки допРасходы\n"
                     + "/reslice НОМЕР — повторный автоматический расчёт\n"
+                    + "/model_reply НОМЕР текст — сообщение по заявке на моделирование\n"
+                    + "/operator_chat — отправьте в общей группе для подключения уведомлений\n"
+                    + "Готовый STL: отправьте файл с подписью /model_stl НОМЕР\n"
                     + "/report — экономика\n/retry_notifications — повторить неотправленные уведомления\n"
                     + "Неотправленных уведомлений с ошибкой: " + outbox.failedCount()
                     + ". Все величины — на весь тираж. В /slice последним аргументом можно указать число пластин; по умолчанию одна.");
@@ -286,6 +346,11 @@ public class BotCommands {
                 messages.text(user, "Ошибочные уведомления возвращены в очередь.");
             }
             case "/reslice" -> service.reslice(user, number(args, 1));
+            case "/model_reply" -> {
+                String[] parts = fullText.split("\\s+", 3);
+                modeling.reply(user, number(args, 1), argument(parts, 2));
+                messages.text(user, "Сообщение передано клиенту.");
+            }
             default -> throw new BusinessException("Неизвестная команда.");
         }
     }

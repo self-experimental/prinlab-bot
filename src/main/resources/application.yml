@@ -2,7 +2,7 @@ spring:
   application:
     name: printlab-bot
   main:
-    web-application-type: none
+    web-application-type: servlet
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5434/printlab}
     username: ${DB_USER:printlab}
@@ -15,11 +15,24 @@ spring:
     scheduling:
       pool:
         size: 3
+server:
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: ${SERVER_PORT:8082}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
 printlab:
   demo-mode: false
   bot-enabled: ${BOT_ENABLED:false}
   bot-token: ${TELEGRAM_BOT_TOKEN:}
   admin-ids: ${TELEGRAM_ADMIN_IDS:}
+  operations:
+    admin-usernames: ${TELEGRAM_ADMIN_USERNAMES:}
   storage-dir: ${MODEL_STORAGE_DIR:./data/models}
   pricing-confirmed: ${PRICING_CONFIRMED:false}
   contact: ${BUSINESS_CONTACT:}
@@ -35,20 +48,27 @@ printlab:
     max-colors: 1
   slicer:
     engine: ${SLICER_ENGINE:BAMBU_STUDIO}
+    transport: ${SLICER_TRANSPORT:CLI}
+    backend:
+      url: ${SLICER_BACKEND_URL:http://127.0.0.1:8080/api/print-plans/analyze-stl}
+      materials:
+        pla-black: ${SLICER_BACKEND_PLA:prusament-pla}
+        pla-white: ${SLICER_BACKEND_PLA:prusament-pla}
+        petg-black: ${SLICER_BACKEND_PETG:prusament-petg}
     enabled: ${SLICER_ENABLED:false}
     profile-confirmed: ${SLICER_PROFILE_CONFIRMED:false}
     executable: ${SLICER_EXECUTABLE:bambu-studio}
     profiles-dir: ${SLICER_PROFILES_DIR:./config/slicer/a1-mini}
     work-dir: ${SLICER_WORK_DIR:./data/slicing}
     version: ${SLICER_VERSION:unconfigured}
-    timeout-seconds: 180
+    timeout-seconds: ${SLICER_TIMEOUT_SECONDS:210}
     material-profiles:
       pla-black: pla.json
       pla-white: pla.json
       petg-black: petg.json
   # Настройки владельца: PLA 1000 ₽/кг, пуск 150 ₽ на заказ. Неподтверждённые нормы описаны в docs/economics.md.
   rates:
-    version: ${TARIFF_VERSION:a1-mini-v3}
+    version: ${TARIFF_VERSION:a1-mini-v4}
     electricity-per-kwh: ${ELECTRICITY_PER_KWH:13.00}
     printer-kw: ${PRINTER_KW:0.15}
     # Расчёт: стоимость / ресурс. Ручная почасовая ставка используется только для старых снимков.
@@ -68,7 +88,7 @@ printlab:
     payment-fixed: ${PAYMENT_FIXED:0.00}
     tax-rate: ${TAX_RATE:0.04}
     # Доход печати / все учтённые расходы. Сбор за запуск прибавляется сверх этого дохода.
-    target-profit-markup: ${TARGET_PROFIT_MARKUP:1.00}
+    target-profit-markup: ${TARGET_PROFIT_MARKUP:0.50}
     minimum-profit-markup: ${MINIMUM_PROFIT_MARKUP:0.50}
     # Только для исторических тарифов без target-profit-markup.
     target-margin: 0.40

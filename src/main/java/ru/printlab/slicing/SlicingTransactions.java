@@ -49,6 +49,19 @@ public class SlicingTransactions {
     }
 
     @Transactional
+    public void retry(SliceJob job, String reason) {
+        orders.lock();
+        if (!jobs.running(job.id())) {
+            return;
+        }
+        if (job.attempts() >= 2) {
+            fail(job, reason);
+            return;
+        }
+        jobs.retry(job.id(), clock.instant().plusSeconds(30), reason);
+    }
+
+    @Transactional
     public void fail(SliceJob job, String reason) {
         orders.lock();
         if (!jobs.running(job.id())) {

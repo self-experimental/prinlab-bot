@@ -35,6 +35,8 @@ public class SlicingWorker {
             }
             SliceResult result = engine.slice(job, order, orders.model(order.modelId()));
             transactions.complete(job, result);
+        } catch (RetryableSlicingException exception) {
+            transactions.retry(job, exception.getMessage());
         } catch (BusinessException exception) {
             transactions.fail(job, exception.getMessage());
         } catch (RuntimeException exception) {

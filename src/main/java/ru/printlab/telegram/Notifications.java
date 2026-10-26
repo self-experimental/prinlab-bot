@@ -8,6 +8,7 @@ import java.util.UUID;
 import ru.printlab.order.Quote;
 import ru.printlab.pricing.PublicPrice;
 import ru.printlab.common.Money;
+import ru.printlab.operator.OperatorAccess;
 
 import java.time.Clock;
 import java.time.ZoneId;
@@ -23,12 +24,14 @@ public class Notifications {
     private final AppProperties properties;
     private final Clock clock;
     private final OrderDao orders;
+    private final OperatorAccess operators;
 
-    public Notifications(OutboxDao outbox, AppProperties properties, Clock clock, OrderDao orders) {
+    public Notifications(OutboxDao outbox, AppProperties properties, Clock clock, OrderDao orders, OperatorAccess operators) {
         this.outbox = outbox;
         this.properties = properties;
         this.clock = clock;
         this.orders = orders;
+        this.operators = operators;
     }
 
     public void text(UUID customer, String text) {
@@ -60,14 +63,32 @@ public class Notifications {
     }
 
     public void admins(String text) {
-        for (long admin : properties.adminIds()) {
+        for (long admin : operators.recipients()) {
             text(admin, text);
         }
     }
 
     public void fileToAdmins(String fileId, String caption) {
-        for (long admin : properties.adminIds()) {
+        for (long admin : operators.recipients()) {
             outbox.add("sendDocument", Map.of("chat_id", admin, "document", fileId, "caption", caption), clock.instant());
+        }
+    }
+
+    public void document(UUID customer, String fileId, String caption) {
+        reference(orders.telegramId(customer), fileId, true, caption);
+    }
+
+    public void referenceToAdmins(String fileId, boolean document, String caption) {
+        for (long admin : operators.recipients()) {
+            reference(admin, fileId, document, caption);
+        }
+    }
+
+    public void reference(long chat, String fileId, boolean document, String caption) {
+        if (document) {
+            outbox.add("sendDocument", Map.of("chat_id", chat, "document", fileId, "caption", caption), clock.instant());
+        } else {
+            outbox.add("sendPhoto", Map.of("chat_id", chat, "photo", fileId, "caption", caption), clock.instant());
         }
     }
 

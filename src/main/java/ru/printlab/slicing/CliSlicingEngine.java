@@ -1,6 +1,7 @@
 package ru.printlab.slicing;
 
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import ru.printlab.common.BusinessException;
 import ru.printlab.config.AppProperties;
 import ru.printlab.order.PrintOrder;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 @Component
+@ConditionalOnProperty(name = "printlab.slicer.transport", havingValue = "CLI", matchIfMissing = true)
 public class CliSlicingEngine implements SlicingEngine {
     private final SlicerProperties config;
     private final AppProperties app;

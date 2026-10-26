@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.*;
 @SpringBootTest
 @ActiveProfiles("test")
 class PricingTest {
+    @Autowired ru.printlab.operator.OperatorProperties operators;
     @Autowired PricingService pricing;
     @Autowired AppProperties properties;
 
@@ -105,6 +106,6 @@ class PricingTest {
                 original.minimumPrintPrice(), original.minimumContribution(), original.quoteHours());
         AppProperties config = new AppProperties(true, false, "", properties.adminIds(), properties.storageDir(), false,
                 invalid, properties.promotion(), properties.materials(), "", "", "", "");
-        assertThatThrownBy(() -> new ru.printlab.config.RuntimeConfig(config)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> new ru.printlab.config.RuntimeConfig(config, operators)).isInstanceOf(IllegalStateException.class);
     }
 }

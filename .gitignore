@@ -5,3 +5,5 @@ data/
 *.iml
 .DS_Store
 .local/
+__pycache__/
+*.pyc

@@ -30,7 +30,8 @@ public class SlicingDao {
         jdbc.sql("UPDATE slicing_jobs SET state = 'QUEUED' WHERE state = 'RUNNING' AND lease_until <= ?")
                 .param(Timestamp.from(now))
                 .update();
-        SliceJob job = jdbc.sql("SELECT * FROM slicing_jobs WHERE state = 'QUEUED' ORDER BY created_at LIMIT 1 FOR UPDATE")
+        SliceJob job = jdbc.sql("SELECT * FROM slicing_jobs WHERE state = 'QUEUED' AND (lease_until IS NULL OR lease_until <= ?) ORDER BY created_at LIMIT 1 FOR UPDATE")
+                .param(Timestamp.from(now))
                 .query((rs, row) -> new SliceJob(rs.getObject("id", UUID.class), rs.getObject("order_id", UUID.class),
                         rs.getInt("attempts")))
                 .optional()
@@ -49,6 +50,14 @@ public class SlicingDao {
                 .param(id)
                 .query(Long.class)
                 .single() > 0;
+    }
+
+    public void retry(UUID id, Instant notBefore, String reason) {
+        jdbc.sql("UPDATE slicing_jobs SET state = 'QUEUED', lease_until = ?, result = ? WHERE id = ?")
+                .param(Timestamp.from(notBefore))
+                .param(reason)
+                .param(id)
+                .update();
     }
 
     public void finish(UUID id, String state, String result) {

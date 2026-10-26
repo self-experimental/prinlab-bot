@@ -19,8 +19,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest
 @ActiveProfiles("test")
 @TestPropertySource(properties = {
-        "printlab.rates.version=a1-mini-v3",
-        "printlab.rates.target-profit-markup=1.00",
+        "printlab.rates.version=a1-mini-v4",
+        "printlab.rates.target-profit-markup=0.50",
         "printlab.rates.minimum-profit-markup=0.50",
         "printlab.rates.minimum-contribution=0.00",
         "printlab.rates.electricity-per-kwh=13.00",
@@ -47,36 +47,36 @@ class A1MiniPricingTest {
         assertThat(quote.costs().maintenance()).isEqualByComparingTo("17.50");
         assertThat(quote.costs().failureReserve()).isEqualByComparingTo("14.93");
         assertThat(quote.costs().total()).isEqualByComparingTo("184.26");
-        assertThat(quote.publicPrice().regularPrintPrice()).isEqualByComparingTo("460.00");
+        assertThat(quote.publicPrice().regularPrintPrice()).isEqualByComparingTo("330.00");
         assertThat(quote.publicPrice().launchFee()).isEqualByComparingTo("150.00");
-        assertThat(quote.publicPrice().total()).isEqualByComparingTo("610.00");
-        assertThat(quote.economics().totalCost()).isEqualByComparingTo("226.96");
-        assertThat(quote.economics().contribution()).isEqualByComparingTo("383.04");
-        assertThat(quote.economics().printingContribution()).isEqualByComparingTo("233.04");
-        assertThat(quote.economics().profitMarkup()).isGreaterThanOrEqualTo(BigDecimal.ONE);
+        assertThat(quote.publicPrice().total()).isEqualByComparingTo("480.00");
+        assertThat(quote.economics().totalCost()).isEqualByComparingTo("217.86");
+        assertThat(quote.economics().contribution()).isEqualByComparingTo("262.14");
+        assertThat(quote.economics().printingContribution()).isEqualByComparingTo("112.14");
+        assertThat(quote.economics().profitMarkup()).isGreaterThanOrEqualTo(new BigDecimal("0.50"));
         // The old 15 RUB/h fixture is not added to the capital-based 10 RUB/h.
         assertThat(properties.rates().effectiveDepreciationPerHour()).isEqualByComparingTo("10.00");
 
-        // Owner's example, including 22.50 RUB commission and 30.00 RUB tax in the 300 RUB cost.
-        Estimate ownerExample = new Estimate(new BigDecimal("131.92"), BigDecimal.ZERO, new BigDecimal("210"),
+        // Exactly 300 RUB cost, 50% printing profit and a separate 150 RUB launch.
+        Estimate ownerExample = new Estimate(new BigDecimal("141.37"), BigDecimal.ZERO, new BigDecimal("210"),
                 BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
         var exactQuote = pricing.calculate("pla-black", ownerExample, false, false, "");
         assertThat(exactQuote.economics().totalCost()).isEqualByComparingTo("300.00");
-        assertThat(exactQuote.economics().printingContribution()).isEqualByComparingTo("300.00");
+        assertThat(exactQuote.economics().printingContribution()).isEqualByComparingTo("150.00");
         assertThat(exactQuote.publicPrice().launchFee()).isEqualByComparingTo("150.00");
-        assertThat(exactQuote.publicPrice().total()).isEqualByComparingTo("750.00");
+        assertThat(exactQuote.publicPrice().total()).isEqualByComparingTo("600.00");
     }
 
     @Test
     void promotionExcludesLaunchAndFeesAndTaxIncludeEntirePayment() {
         var quote = pricing.calculate("pla-black", Fixtures.estimate(), true, true, "FIRST50");
-        assertThat(quote.publicPrice().discount()).isEqualByComparingTo("230.00");
-        assertThat(quote.publicPrice().total()).isEqualByComparingTo("380.00");
-        assertThat(quote.economics().paymentFee()).isEqualByComparingTo("11.40");
-        assertThat(quote.economics().estimatedTax()).isEqualByComparingTo("15.20");
-        assertThat(quote.economics().contribution()).isEqualByComparingTo("169.14");
-        assertThat(quote.economics().printingContribution()).isEqualByComparingTo("19.14");
-        assertThat(quote.economics().minimumContribution()).isEqualByComparingTo("255.43");
+        assertThat(quote.publicPrice().discount()).isEqualByComparingTo("165.00");
+        assertThat(quote.publicPrice().total()).isEqualByComparingTo("315.00");
+        assertThat(quote.economics().paymentFee()).isEqualByComparingTo("9.45");
+        assertThat(quote.economics().estimatedTax()).isEqualByComparingTo("12.60");
+        assertThat(quote.economics().contribution()).isEqualByComparingTo("108.69");
+        assertThat(quote.economics().printingContribution()).isEqualByComparingTo("-41.31");
+        assertThat(quote.economics().minimumContribution()).isEqualByComparingTo("253.16");
         assertThat(quote.economics().needsReview()).isTrue();
 
         // A one-kopeck difference crosses the percentage threshold.
@@ -94,10 +94,10 @@ class A1MiniPricingTest {
                 BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, 2);
         var quote = pricing.calculate("pla-black", batch, true, true, "");
         assertThat(quote.costs().material()).isEqualByComparingTo("75.00");
-        assertThat(quote.publicPrice().regularPrintPrice()).isEqualByComparingTo("460.00");
+        assertThat(quote.publicPrice().regularPrintPrice()).isEqualByComparingTo("330.00");
         assertThat(quote.publicPrice().launchFee()).isEqualByComparingTo("150.00");
-        assertThat(quote.publicPrice().discount()).isEqualByComparingTo("230.00");
-        assertThat(quote.publicPrice().total()).isEqualByComparingTo("380.00");
+        assertThat(quote.publicPrice().discount()).isEqualByComparingTo("165.00");
+        assertThat(quote.publicPrice().total()).isEqualByComparingTo("315.00");
     }
 
     @Test

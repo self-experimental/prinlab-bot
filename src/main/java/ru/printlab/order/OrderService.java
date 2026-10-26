@@ -17,6 +17,7 @@ import ru.printlab.storage.ModelStorage;
 import ru.printlab.telegram.Notifications;
 import ru.printlab.slicing.SlicingDao;
 import ru.printlab.slicing.SlicerProperties;
+import ru.printlab.operator.OperatorAccess;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -40,10 +41,12 @@ public class OrderService {
     private final Clock clock;
     private final SlicingDao slicing;
     private final SlicerProperties slicerProperties;
+    private final OperatorAccess operators;
 
     public OrderService(OrderDao orders, PaymentDao payments, PricingService pricing, PromotionService promotions,
                         PromotionDao reservations, AppProperties properties, ModelStorage storage,
-                        Notifications notifications, Clock clock, SlicingDao slicing, SlicerProperties slicerProperties) {
+                        Notifications notifications, Clock clock, SlicingDao slicing, SlicerProperties slicerProperties,
+                        OperatorAccess operators) {
         this.orders = orders;
         this.payments = payments;
         this.pricing = pricing;
@@ -55,10 +58,11 @@ public class OrderService {
         this.clock = clock;
         this.slicing = slicing;
         this.slicerProperties = slicerProperties;
+        this.operators = operators;
     }
 
     public boolean isAdmin(long user) {
-        return properties.adminIds().contains(user);
+        return operators.isAdmin(user);
     }
 
     public void requireAdmin(long user) {
@@ -152,15 +156,20 @@ public class OrderService {
             throw new BusinessException("Выбранный материал закончился. Выберите другой в черновике.");
         }
         change(order, user, OrderStatus.ESTIMATING, "Клиент отправил заявку");
+        ModelFile model = orders.model(order.modelId());
+        notifications.fileToAdmins(model.telegramFileId(), "Заказ №" + order.number() + "\n" + summary(order));
         if (slicerProperties.enabled()) {
             slicing.enqueue(order.id(), clock.instant());
+            notifications.admins("Новая заявка №" + order.number() + " отправлена на автоматический расчёт.");
             notifications.text(user, "Модель отправлена на автоматический расчёт. Время печати и расход получим из профиля принтера.");
+            if (order.quantity() > 1) {
+                notifications.text(user, "Расчёт тиража: каждое изделие печатается на отдельной пластине. "
+                        + "Совместное размещение и пересчёт можно согласовать с оператором до оплаты.");
+            }
             return;
         }
-        ModelFile model = orders.model(order.modelId());
         notifications.text(user, "Заявка №" + order.number()
                 + " получена. Оператор рассчитает печать и отправит вам цену. До подтверждения платить не нужно.");
-        notifications.fileToAdmins(model.telegramFileId(), "Заказ №" + order.number() + "\n" + summary(order));
         notifications.admins("Новая заявка №" + order.number() + ". Проверьте размеры, ориентацию, поддержки и весь тираж в слайсере.\n"
                 + "Ввод: /slice " + order.number() + " граммы минутыПечати минутыПодготовки минутыОбработки отходыГ стоимостьДоставки ценаДоставки [пластин]\n"
                 + "Без доставки и дополнительных отходов: /slice " + order.number()
@@ -313,7 +322,7 @@ public class OrderService {
         if (order.status() == OrderStatus.CANCELLED) {
             return;
         }
-        order.status().require(OrderStatus.DRAFT, OrderStatus.ESTIMATING, OrderStatus.REVIEW_REQUIRED,
+        order.status().require(OrderStatus.DRAFT, OrderStatus.MODELING, OrderStatus.ESTIMATING, OrderStatus.REVIEW_REQUIRED,
                 OrderStatus.QUOTE_READY, OrderStatus.AWAITING_PAYMENT, OrderStatus.EXPIRED);
         reservations.release(orderId);
         change(order, actor, OrderStatus.CANCELLED, "Отмена до оплаты");

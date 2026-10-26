@@ -8,4 +8,4 @@ fi
 set -a
 source .env
 set +a
-exec java -jar target/printlab-bot-0.1.0.jar "$@"
+exec java -jar target/app.jar "$@"
