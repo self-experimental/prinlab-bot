@@ -1,0 +1,41 @@
+spring:
+  datasource:
+    url: ${TEST_DATABASE_URL:jdbc:h2:mem:printlab-test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1}
+    username: ${TEST_DATABASE_USER:sa}
+    password: ${TEST_DATABASE_PASSWORD:}
+printlab:
+  demo-mode: true
+  bot-enabled: false
+  admin-ids: [111]
+  storage-dir: ./target/test-models
+  contact: '@test_operator'
+  terms-url: https://example.test/terms
+  privacy-url: https://example.test/privacy
+  payment-instructions: Тестовая инструкция, не переводите деньги.
+  # Historical deterministic fixture for the existing lifecycle tests.
+  rates:
+    version: example-v1
+    target-profit-markup: ""
+    minimum-profit-markup: 0
+    minimum-contribution: 100.00
+    electricity-per-kwh: 7.00
+    depreciation-per-hour: 15.00
+    printer-purchase-cost: 0
+    printer-lifetime-hours: 0
+    launch-fee: 0
+    launch-fee-per-order: false
+    minimum-print-price: 400.00
+    failure-probability: 0.05
+    acquisition-per-new-customer: 80.00
+  materials:
+    pla-black:
+      cost-per-kg: 1200.00
+    pla-white:
+      cost-per-kg: 1200.00
+    petg-black:
+      cost-per-kg: 1500.00
+  promotion:
+    enabled: true
+    ends-at: 2030-01-01T00:00:00Z
+  slicer:
+    enabled: false

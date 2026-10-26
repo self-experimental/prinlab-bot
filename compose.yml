@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: printlab
+      POSTGRES_USER: printlab
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U printlab -d printlab"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  bot:
+    profiles: ["container"]
+    build: .
+    env_file: ${BOT_ENV_FILE:-.env}
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/printlab
+      MODEL_STORAGE_DIR: /app/data/models
+      SLICER_PROFILES_DIR: /app/config/slicer/a1-mini
+      SLICER_WORK_DIR: /app/data/slicing
+      # Текущий запуск на VPS: расчёт в Bambu Studio выполняет оператор.
+      SLICER_ENABLED: "false"
+      SLICER_PROFILE_CONFIRMED: "false"
+    volumes:
+      - bot-data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: ${BOT_MEMORY_LIMIT:-1g}
+    cpus: ${BOT_CPUS:-1.0}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  postgres-data:
+  bot-data:

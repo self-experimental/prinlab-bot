@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:printlab-demo;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+printlab:
+  demo-mode: true
+  bot-enabled: false
+  admin-ids: [111]
+  storage-dir: ./target/demo-models
+  promotion:
+    enabled: true
+    ends-at: 2099-01-01T00:00:00Z
+  slicer:
+    enabled: false

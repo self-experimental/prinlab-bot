@@ -1,0 +1,98 @@
+spring:
+  application:
+    name: printlab-bot
+  main:
+    web-application-type: none
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5434/printlab}
+    username: ${DB_USER:printlab}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 5
+  flyway:
+    locations: classpath:db/migration
+  task:
+    scheduling:
+      pool:
+        size: 3
+printlab:
+  demo-mode: false
+  bot-enabled: ${BOT_ENABLED:false}
+  bot-token: ${TELEGRAM_BOT_TOKEN:}
+  admin-ids: ${TELEGRAM_ADMIN_IDS:}
+  storage-dir: ${MODEL_STORAGE_DIR:./data/models}
+  pricing-confirmed: ${PRICING_CONFIRMED:false}
+  contact: ${BUSINESS_CONTACT:}
+  terms-url: ${TERMS_URL:}
+  privacy-url: ${PRIVACY_URL:}
+  payment-instructions: ${PAYMENT_INSTRUCTIONS:}
+  printer:
+    model: Bambu Lab A1 mini
+    width-mm: 180
+    depth-mm: 180
+    height-mm: 180
+    nozzle-diameter-mm: ${NOZZLE_DIAMETER_MM:0.4}
+    max-colors: 1
+  slicer:
+    engine: ${SLICER_ENGINE:BAMBU_STUDIO}
+    enabled: ${SLICER_ENABLED:false}
+    profile-confirmed: ${SLICER_PROFILE_CONFIRMED:false}
+    executable: ${SLICER_EXECUTABLE:bambu-studio}
+    profiles-dir: ${SLICER_PROFILES_DIR:./config/slicer/a1-mini}
+    work-dir: ${SLICER_WORK_DIR:./data/slicing}
+    version: ${SLICER_VERSION:unconfigured}
+    timeout-seconds: 180
+    material-profiles:
+      pla-black: pla.json
+      pla-white: pla.json
+      petg-black: petg.json
+  # Настройки владельца: PLA 1000 ₽/кг, пуск 150 ₽ на заказ. Неподтверждённые нормы описаны в docs/economics.md.
+  rates:
+    version: ${TARIFF_VERSION:a1-mini-v3}
+    electricity-per-kwh: ${ELECTRICITY_PER_KWH:13.00}
+    printer-kw: ${PRINTER_KW:0.15}
+    # Расчёт: стоимость / ресурс. Ручная почасовая ставка используется только для старых снимков.
+    printer-purchase-cost: ${PRINTER_PURCHASE_COST:20000.00}
+    printer-lifetime-hours: ${PRINTER_LIFETIME_HOURS:2000}
+    depreciation-per-hour: ${DEPRECIATION_PER_HOUR:0.00}
+    maintenance-per-hour: ${MAINTENANCE_PER_HOUR:5.00}
+    # По запросу владельца стоимость его рабочего времени не включается.
+    labor-per-hour: ${LABOR_PER_HOUR:0.00}
+    packaging: ${PACKAGING:35.00}
+    acquisition-per-new-customer: ${ACQUISITION_PER_NEW_CUSTOMER:0.00}
+    failure-probability: ${FAILURE_PROBABILITY:0.10}
+    launch-fee: ${LAUNCH_FEE:150.00}
+    discount-launch-fee: ${DISCOUNT_LAUNCH_FEE:false}
+    launch-fee-per-order: ${LAUNCH_FEE_PER_ORDER:true}
+    payment-rate: ${PAYMENT_RATE:0.03}
+    payment-fixed: ${PAYMENT_FIXED:0.00}
+    tax-rate: ${TAX_RATE:0.04}
+    # Доход печати / все учтённые расходы. Сбор за запуск прибавляется сверх этого дохода.
+    target-profit-markup: ${TARGET_PROFIT_MARKUP:1.00}
+    minimum-profit-markup: ${MINIMUM_PROFIT_MARKUP:0.50}
+    # Только для исторических тарифов без target-profit-markup.
+    target-margin: 0.40
+    minimum-print-price: ${MINIMUM_PRINT_PRICE:0.00}
+    minimum-contribution: ${MINIMUM_CONTRIBUTION:0.00}
+    quote-hours: 24
+  promotion:
+    enabled: ${PROMO_ENABLED:false}
+    code: FIRST50
+    rate: 0.50
+    max-discount: ${PROMO_MAX_DISCOUNT:600.00}
+    max-paid-orders: ${PROMO_MAX_PAID_ORDERS:20}
+    budget: ${PROMO_BUDGET:12000.00}
+    ends-at: ${PROMO_ENDS_AT:2026-12-31T20:59:59Z}
+  materials:
+    pla-black:
+      label: ${PLA_BLACK_LABEL:PLA (цвет уточняется)}
+      cost-per-kg: ${PLA_BLACK_PER_KG:1000.00}
+      available: ${PLA_BLACK_AVAILABLE:true}
+    pla-white:
+      label: PLA белый
+      cost-per-kg: ${PLA_WHITE_PER_KG:1000.00}
+      available: ${PLA_WHITE_AVAILABLE:false}
+    petg-black:
+      label: PETG чёрный
+      cost-per-kg: ${PETG_BLACK_PER_KG:900.00}
+      available: ${PETG_BLACK_AVAILABLE:false}

@@ -1,0 +1,29 @@
+{
+  "source": "https://github.com/bambulab/BambuStudio/releases/tag/v02.08.02.61",
+  "version": "02.08.02.61",
+  "printer": "Bambu Lab A1 mini",
+  "nozzleMm": "0.4",
+  "material": "Generic PLA @BBL A1M",
+  "colorCount": 1,
+  "calibratedOnOwnersPrinter": false,
+  "presets": {
+    "fine.json": {
+      "name": "0.12mm Fine @BBL A1M",
+      "sha256": "71d3ffe70656d3696630c1ccd3c076e8c94caef71c07b56d9cc18401d9ac4d75"
+    },
+    "machine.json": {
+      "name": "Bambu Lab A1 mini 0.4 nozzle",
+      "sha256": "7c8d0a11106480fcc2c6d03cb964733220a2d9fbff6f40e34d093330288c981c"
+    },
+    "pla.json": {
+      "name": "Generic PLA @BBL A1M",
+      "sha256": "edd0a6f795b70af303df05f27a11306951fa4928f0794b72f79c860da370200d"
+    },
+    "standard.json": {
+      "name": "0.20mm Standard @BBL A1M",
+      "sha256": "c4f10d9068052a35606ca93d94b475c28812025f61f9ba4c71937c78880add09"
+    }
+  },
+  "materialConfirmedByOwner": true,
+  "nozzleConfirmedByOwner": true
+}
