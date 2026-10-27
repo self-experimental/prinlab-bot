@@ -63,7 +63,6 @@ services:
       SLICER_TIMEOUT_SECONDS: "210"
       TARGET_PROFIT_MARKUP: "0.50"
       MINIMUM_PROFIT_MARKUP: "0.50"
-      TARIFF_VERSION: a1-mini-v5
     volumes:
       - bot-data:/app/data
     tmpfs:

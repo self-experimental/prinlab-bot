@@ -22,6 +22,11 @@ class DeployTest(unittest.TestCase):
                             registry_user='owner', registry_token='secret_' + 'x' * 40,
                             run_number=10, run_attempt=1)
         (self.root / 'backups').mkdir()
+        (self.root / 'config').mkdir()
+        self.bot_env = self.root / 'config/bot.env'
+        self.pending_env = self.root / 'config/bot.env.pending'
+        self.bot_env.write_text('LAUNCH_FEE=150.00\n')
+        self.pending_env.write_text('LAUNCH_FEE=0.00\n')
         self.stack = []
         for name, value in dict(ROOT=self.root, STATE=self.root / 'state', ENV_FILE=self.env).items():
             p = patch.object(receiver, name, value)
@@ -53,6 +58,9 @@ class DeployTest(unittest.TestCase):
         state = json.loads((receiver.STATE / 'bot.json').read_text())
         self.assertEqual('old-bot', state['previous_image'])
         self.assertEqual(0o600, self.env.stat().st_mode & 0o777)
+        self.assertEqual('LAUNCH_FEE=0.00\n', self.bot_env.read_text())
+        self.assertEqual(0o600, self.bot_env.stat().st_mode & 0o777)
+        self.assertFalse(self.pending_env.exists())
         login = next(args for args in self.stack if 'login' in args)
         self.assertNotIn(self.payload['registry_token'], ' '.join(login))
 
@@ -77,6 +85,8 @@ class DeployTest(unittest.TestCase):
             receiver.deploy('bot', self.payload)
         self.assertEqual(dict(BOT_IMAGE='old-bot'), receiver.read_env())
         self.assertFalse((receiver.STATE / 'bot.json').exists())
+        self.assertEqual('LAUNCH_FEE=150.00\n', self.bot_env.read_text())
+        self.assertTrue(self.pending_env.exists())
         self.assertEqual(2, sum('up' in args for args in self.stack))
 
     def test_wrong_revision_never_restarts_service(self):

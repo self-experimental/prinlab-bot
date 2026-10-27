@@ -120,22 +120,35 @@ def deploy(component, payload):
         key = component.upper() + '_IMAGE'
         old_image = values[key]
         values[key] = image
+        bot_env = ROOT / 'config' / 'bot.env'
+        pending_env = ROOT / 'config' / 'bot.env.pending'
+        old_config = None
+        new_config = None
+        if pending_env.exists():
+            old_config = bot_env.read_text()
+            new_config = pending_env.read_text()
         print(f'Deploying {component} {revision}', flush=True)
         try:
             backup = run(['/usr/bin/docker', 'compose', '--env-file', str(ENV_FILE), '-f', str(COMPOSE),
                 'exec', '-T', 'db', 'pg_dump', '-U', 'printlab', '-d', 'printlab'], timeout=60)
             atomic_write(ROOT / 'backups' / (str(int(time.time())) + '.sql'), backup + '\n')
+            if new_config is not None:
+                atomic_write(bot_env, new_config)
             write_env(values)
             compose(component)
             check(component)
             atomic_write(state_file, json.dumps(dict(revision=revision, image=image,
                 previous_image=old_image, run_number=payload['run_number'],
                 run_attempt=payload['run_attempt'], deployed_at=int(time.time()))) + '\n')
+            if new_config is not None:
+                pending_env.unlink()
         except BaseException:
             # An interrupted SSH/CI job must not leave an unverified image active.
             for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
                 signal.signal(signum, signal.SIG_IGN)
             values[key] = old_image
+            if old_config is not None:
+                atomic_write(bot_env, old_config)
             write_env(values)
             compose(component)
             print('Deployment failed; previous image restored', flush=True)
