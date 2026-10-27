@@ -85,7 +85,7 @@ def run(args, **kwargs):
 
 def compose(component):
     run(['/usr/bin/docker', 'compose', '--env-file', str(ENV_FILE), '-f', str(COMPOSE),
-         'up', '-d', '--no-deps', '--pull', 'never', '--wait', '--wait-timeout', '150', component],
+         'up', '-d', '--no-deps', '--pull', 'never', '--wait', '--wait-timeout', '300', component],
         timeout=390)
 
 

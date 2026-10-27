@@ -55,6 +55,8 @@ class DeployTest(unittest.TestCase):
         values = receiver.read_env()
         self.assertTrue(values['BOT_IMAGE'].endswith('@' + self.payload['digest']))
         check.assert_called_once_with('bot')
+        startup = next(args for args in self.stack if 'up' in args)
+        self.assertEqual('300', startup[startup.index('--wait-timeout') + 1])
         state = json.loads((receiver.STATE / 'bot.json').read_text())
         self.assertEqual('old-bot', state['previous_image'])
         self.assertEqual(0o600, self.env.stat().st_mode & 0o777)

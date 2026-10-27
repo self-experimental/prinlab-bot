@@ -77,6 +77,12 @@ services:
         condition: service_healthy
     mem_limit: 768m
     cpus: 1
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, 'http://127.0.0.1:8082/actuator/health']
+      start_period: 180s
+      interval: 10s
+      timeout: 5s
+      retries: 6
     stop_grace_period: 240s
     logging:
       driver: json-file

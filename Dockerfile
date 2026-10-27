@@ -17,6 +17,6 @@ COPY --chown=10001:10001 deploy/stepped-block.stl /app/smoke.stl
 USER 10001:10001
 ENV SERVER_ADDRESS=0.0.0.0 SERVER_PORT=8082
 EXPOSE 8082
-HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=6 \
+HEALTHCHECK --interval=10s --timeout=5s --start-period=180s --retries=6 \
     CMD curl --fail --silent http://127.0.0.1:8082/actuator/health > /dev/null || exit 1
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=50", "-jar", "/app/app.jar"]
