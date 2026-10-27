@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import tools.jackson.databind.JsonNode;
 
 @Service
 public class OutboxWorker {
@@ -27,7 +28,13 @@ public class OutboxWorker {
             return false;
         }
         try {
-            gateway.deliver(entry.method(), entry.payload());
+            JsonNode result = gateway.deliver(entry.method(), entry.payload());
+            if (entry.orderId() != null) {
+                if (result == null || result.path("message_id").asLong() <= 0 || result.path("chat").path("id").asLong() == 0) {
+                    throw new TelegramFailure(false, 30);
+                }
+                dao.remember(result.path("chat").path("id").asLong(), result.path("message_id").asLong(), entry.orderId());
+            }
             dao.delivered(entry.id());
         } catch (TelegramFailure failure) {
             boolean permanent = failure.permanent() || entry.attempts() >= 9;

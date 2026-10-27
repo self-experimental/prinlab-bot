@@ -28,13 +28,19 @@ public class PromotionDao {
                 .update();
     }
 
-    public boolean customerReserved(UUID customer, String code, UUID exceptOrder) {
-        return jdbc.sql("SELECT COUNT(*) FROM promotion_reservations WHERE customer_id = ? AND code = ? AND order_id <> ?")
+    public boolean customerReserved(UUID customer, UUID exceptOrder) {
+        return jdbc.sql("SELECT COUNT(*) FROM promotion_reservations WHERE customer_id = ? AND order_id <> ?")
                 .param(customer)
-                .param(code)
                 .param(exceptOrder)
                 .query(Long.class)
                 .single() > 0;
+    }
+
+    public long paidSlots(String code) {
+        return jdbc.sql("SELECT COUNT(*) FROM promotion_reservations WHERE code = ? AND redeemed = TRUE")
+                .param(code)
+                .query(Long.class)
+                .single();
     }
 
     public long usedSlots(String code, UUID exceptOrder) {

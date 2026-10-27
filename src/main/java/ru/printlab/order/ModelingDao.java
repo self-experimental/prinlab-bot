@@ -41,4 +41,25 @@ public class ModelingDao {
                 .query((rs, row) -> new ModelingPhoto(rs.getString("telegram_file_id"), rs.getBoolean("document"), rs.getString("caption")))
                 .list();
     }
+
+    public void postponeReceipt(UUID order, Instant dueAt) {
+        removeReceipt(order);
+        jdbc.sql("INSERT INTO modeling_receipts(order_id, due_at) VALUES (?, ?)")
+                .param(order)
+                .param(Timestamp.from(dueAt))
+                .update();
+    }
+
+    public List<UUID> dueReceipts(Instant now) {
+        return jdbc.sql("SELECT order_id FROM modeling_receipts WHERE due_at <= ? ORDER BY due_at")
+                .param(Timestamp.from(now))
+                .query(UUID.class)
+                .list();
+    }
+
+    public void removeReceipt(UUID order) {
+        jdbc.sql("DELETE FROM modeling_receipts WHERE order_id = ?")
+                .param(order)
+                .update();
+    }
 }

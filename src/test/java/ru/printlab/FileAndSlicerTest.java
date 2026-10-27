@@ -149,6 +149,15 @@ class FileAndSlicerTest {
             assertThat(result.provenance()).contains("candidate=requested", "quantity=5", "one-item-per-plate", model.sha256());
             assertThat(requestBody.get()).contains("name=\"minimumInfillPercent\"\r\n\r\n30",
                     "name=\"layerHeightMm\"\r\n\r\n0.12", "prusament-pla", "name=\"supportMode\"\r\n\r\nAUTO");
+            PrintOrder custom = new PrintOrder(order.id(), order.number(), order.customerId(), order.status(), order.modelId(),
+                    order.materialId(), "CUSTOM", 1, order.quantity(), "", null, order.createdAt(), null,
+                    null, new java.math.BigDecimal("0.16"));
+            responseBody.set(responseBody.get().replace("\"infillPercent\":30", "\"infillPercent\":1")
+                    .replace("\"layerHeightMm\":0.12", "\"layerHeightMm\":0.16"));
+            assertThat(remote.slice(job, custom, model).estimate().grams()).isEqualByComparingTo("17.5");
+            assertThat(requestBody.get()).contains("name=\"layerHeightMm\"\r\n\r\n0.16", "name=\"minimumInfillPercent\"\r\n\r\n1");
+            responseBody.set(responseBody.get().replace("\"infillPercent\":1", "\"infillPercent\":30")
+                    .replace("\"layerHeightMm\":0.16", "\"layerHeightMm\":0.12"));
             status.set(429);
             assertThatThrownBy(() -> remote.slice(job, order, model)).isInstanceOf(RetryableSlicingException.class);
             status.set(200);

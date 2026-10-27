@@ -59,6 +59,11 @@ public class OperatorAccess {
         dao.chat(id);
     }
 
+    public boolean isGroup(long id) {
+        Long current = dao.chat();
+        return current != null && current == id;
+    }
+
     public void migrate(long oldId, long newId) {
         Long current = dao.chat();
         if (current != null && current == oldId && newId < 0) {

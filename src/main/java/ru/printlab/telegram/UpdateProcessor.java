@@ -61,8 +61,7 @@ public class UpdateProcessor {
             operators.enroll(user, from.path("username").asText(""));
             if (operators.isAdmin(user)) {
                 operators.group(chat);
-                messages.text(chat, "Этот чат подключён для фото, заказов и уведомлений PrintLab. "
-                        + "Команды оператора доступны в личном чате с ботом: /admin.");
+                messages.text(chat, "Этот чат подключён для фото, заказов и уведомлений PrintLab. Откройте /admin для управления заказами и цветами.");
             } else {
                 messages.text(chat, "Подключить чат может только настроенный оператор.");
             }
@@ -85,6 +84,24 @@ public class UpdateProcessor {
                 commands.handle(user, message, callback);
             } catch (BusinessException exception) {
                 messages.text(user, exception.getMessage());
+            }
+        }
+        if (user > 0 && !from.path("is_bot").asBoolean()
+                && chat < 0 && (chatType.equals("group") || chatType.equals("supergroup"))
+                && operators.isGroup(chat)) {
+            orders.lock();
+            operators.enroll(user, from.path("username").asText(""));
+            if (operators.isAdmin(user)) {
+                String name = from.path("first_name").asText("Оператор");
+                if (name.length() > 256) {
+                    name = name.substring(0, 256);
+                }
+                orders.register(user, name, null, clock.instant());
+                try {
+                    commands.handleGroup(user, chat, message, callback);
+                } catch (BusinessException exception) {
+                    messages.text(chat, exception.getMessage());
+                }
             }
         }
         updates.advance(id + 1);

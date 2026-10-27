@@ -51,10 +51,7 @@ public class BackendSlicingEngine implements SlicingEngine {
         if (material == null || !material.matches("[a-z0-9-]{1,100}")) {
             throw new BusinessException("Не настроено соответствие материала каталогу backend слайсера.");
         }
-        String layer = "0.20";
-        if (order.profile().equals("FINE")) {
-            layer = "0.12";
-        }
+        String layer = order.layerHeightMm().toPlainString();
         try {
             var modelPath = app.storageDir().toAbsolutePath().resolve(model.storageName());
             if (Files.size(modelPath) > MAX_MODEL_BYTES) {

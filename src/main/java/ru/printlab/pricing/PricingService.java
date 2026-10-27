@@ -6,6 +6,7 @@ import ru.printlab.common.Money;
 import ru.printlab.config.AppProperties;
 import ru.printlab.config.CostRates;
 import ru.printlab.config.Material;
+import ru.printlab.config.PromotionPolicy;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -20,6 +21,11 @@ public class PricingService {
 
     public PricingSnapshot calculate(String materialId, Estimate estimate, boolean newCustomer,
                                      boolean applyPromo, String promotionNote) {
+        return calculate(materialId, estimate, newCustomer, applyPromo, promotionNote, properties.promotion());
+    }
+
+    public PricingSnapshot calculate(String materialId, Estimate estimate, boolean newCustomer,
+                                     boolean applyPromo, String promotionNote, PromotionPolicy policy) {
         if (!properties.demoMode() && !properties.pricingConfirmed()) {
             throw new BusinessException("Сначала настройте и подтвердите тарифы: PRICING_CONFIRMED=true.");
         }
@@ -42,15 +48,16 @@ public class PricingService {
             if (rates.discountLaunchFee()) {
                 discountBase = discountBase.add(launchFee);
             }
-            discount = Money.rub(discountBase.multiply(properties.promotion().rate()))
-                    .min(properties.promotion().maxDiscount())
-                    .min(discountBase);
+            discount = Money.rub(discountBase.multiply(policy.rate())).min(discountBase);
+            if (policy.maxDiscount() != null) {
+                discount = discount.min(policy.maxDiscount());
+            }
         }
         BigDecimal total = Money.rub(ordinary.add(launchFee).subtract(discount).add(estimate.deliveryPrice()));
         PublicPrice price = new PublicPrice(ordinary, discount, Money.rub(estimate.deliveryPrice()),
                 total, "RUB", promotionNote, launchFee);
         Economics economics = economics(costs, total, rates, launchFee);
-        return new PricingSnapshot(rates.version(), material, rates, properties.promotion(), estimate,
+        return new PricingSnapshot(rates.version(), material, rates, policy, estimate,
                 newCustomer, costs, price, economics);
     }
 
@@ -81,6 +88,22 @@ public class PricingService {
                 .divide(BigDecimal.TEN, 0, RoundingMode.CEILING)
                 .multiply(BigDecimal.TEN)
                 .setScale(2);
+    }
+
+    public PricingSnapshot withDelivery(PricingSnapshot original, BigDecimal deliveryPrice) {
+        Money.nonNegative(deliveryPrice, "Доставка");
+        Estimate source = original.estimate();
+        Estimate estimate = new Estimate(source.grams(), source.extraWasteGrams(), source.printMinutes(),
+                source.setupMinutes(), source.finishingMinutes(), deliveryPrice, deliveryPrice, source.plateCount());
+        CostBreakdown costs = costs(original.material(), original.rates(), estimate, original.newCustomer(), true);
+        PublicPrice previous = original.publicPrice();
+        BigDecimal total = Money.rub(previous.regularPrintPrice().add(previous.launchFee())
+                .subtract(previous.discount()).add(deliveryPrice));
+        PublicPrice price = new PublicPrice(previous.regularPrintPrice(), previous.discount(), Money.rub(deliveryPrice),
+                total, previous.currency(), previous.promotionNote(), previous.launchFee());
+        return new PricingSnapshot(original.tariffVersion(), original.material(), original.rates(), original.promotion(),
+                estimate, original.newCustomer(), costs, price, economics(costs, total, original.rates(), previous.launchFee()),
+                original.color());
     }
 
     public CostBreakdown costs(Material material, CostRates rates, Estimate estimate,

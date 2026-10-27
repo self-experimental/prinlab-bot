@@ -70,10 +70,10 @@ public class SlicingTransactions {
         jobs.finish(job.id(), "FAILED", reason);
         PrintOrder order = orders.get(job.orderId());
         if (order.status() == OrderStatus.ESTIMATING) {
-            messages.text(order.customerId(), "Заказ №" + order.number() + ": автоматический расчёт не завершён. Оператор проверит модель.");
-            messages.admins("Не удалось рассчитать №" + order.number() + ": " + reason + "\nПовтор: /reslice "
+            messages.text(order.customerId(), "Не удалось завершить расчёт заказа №" + order.number() + ". Команда PrintLab проверит модель и ответит тебе здесь.");
+            messages.adminOrder(order, "Не удалось рассчитать №" + order.number() + ": " + reason + "\nПовтор: /reslice "
                     + order.number() + "; ручной резерв: /slice. Файл отправлен ниже.");
-            messages.fileToAdmins(orders.model(order.modelId()).telegramFileId(), "Модель заказа №" + order.number());
+            messages.fileToAdmins(order, orders.model(order.modelId()).telegramFileId(), "Модель заказа №" + order.number());
         }
     }
 }

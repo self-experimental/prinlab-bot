@@ -62,12 +62,14 @@ class PricingTest {
     }
 
     @Test
-    void largeOrderHitsDiscountCapAndExplicitWasteIsCountedOnce() {
+    void largeOrderHasUncappedDiscountAndExplicitWasteIsCountedOnce() {
         Estimate large = new Estimate(new BigDecimal("1000"), new BigDecimal("10"), new BigDecimal("600"),
                 BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
         PricingSnapshot quote = pricing.calculate("pla-black", large, true, true, "");
         assertThat(quote.costs().material()).isEqualByComparingTo("1212.00");
-        assertThat(quote.publicPrice().discount()).isEqualByComparingTo("600.00");
+        assertThat(quote.publicPrice().discount()).isGreaterThan(new BigDecimal("600.00"));
+        assertThat(quote.publicPrice().discount()).isEqualByComparingTo(
+                quote.publicPrice().regularPrintPrice().multiply(new BigDecimal("0.50")));
     }
 
     @Test

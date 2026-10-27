@@ -66,9 +66,9 @@ printlab:
       pla-black: pla.json
       pla-white: pla.json
       petg-black: petg.json
-  # Настройки владельца: PLA 1000 ₽/кг, пуск 150 ₽ на заказ. Неподтверждённые нормы описаны в docs/economics.md.
+  # Настройки владельца: PLA 1000 ₽/кг, без отдельного сбора за запуск. Неподтверждённые нормы описаны в docs/economics.md.
   rates:
-    version: ${TARIFF_VERSION:a1-mini-v4}
+    version: ${TARIFF_VERSION:a1-mini-v5}
     electricity-per-kwh: ${ELECTRICITY_PER_KWH:13.00}
     printer-kw: ${PRINTER_KW:0.15}
     # Расчёт: стоимость / ресурс. Ручная почасовая ставка используется только для старых снимков.
@@ -81,7 +81,7 @@ printlab:
     packaging: ${PACKAGING:35.00}
     acquisition-per-new-customer: ${ACQUISITION_PER_NEW_CUSTOMER:0.00}
     failure-probability: ${FAILURE_PROBABILITY:0.10}
-    launch-fee: ${LAUNCH_FEE:150.00}
+    launch-fee: ${LAUNCH_FEE:0.00}
     discount-launch-fee: ${DISCOUNT_LAUNCH_FEE:false}
     launch-fee-per-order: ${LAUNCH_FEE_PER_ORDER:true}
     payment-rate: ${PAYMENT_RATE:0.03}
@@ -99,9 +99,17 @@ printlab:
     enabled: ${PROMO_ENABLED:false}
     code: FIRST50
     rate: 0.50
-    max-discount: ${PROMO_MAX_DISCOUNT:600.00}
-    max-paid-orders: ${PROMO_MAX_PAID_ORDERS:20}
-    budget: ${PROMO_BUDGET:12000.00}
+    max-discount: ${PROMO_MAX_DISCOUNT:}
+    max-paid-orders: ${PROMO_MAX_PAID_ORDERS:2}
+    budget: ${PROMO_BUDGET:}
+    ends-at: ${PROMO_ENDS_AT:2026-12-31T20:59:59Z}
+  secondary-promotion:
+    enabled: ${PROMO_ENABLED:false}
+    code: FIRST30
+    rate: 0.30
+    max-discount: ${PROMO_MAX_DISCOUNT:}
+    max-paid-orders: ${PROMO_SECOND_MAX_PAID_ORDERS:5}
+    budget: ${PROMO_BUDGET:}
     ends-at: ${PROMO_ENDS_AT:2026-12-31T20:59:59Z}
   materials:
     pla-black:

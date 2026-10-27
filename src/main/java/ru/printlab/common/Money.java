@@ -25,6 +25,6 @@ public final class Money {
     }
 
     public static String format(BigDecimal value) {
-        return rub(value).toPlainString() + " ₽";
+        return rub(value).toPlainString().replace('.', ',') + " ₽";
     }
 }

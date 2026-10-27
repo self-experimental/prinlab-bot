@@ -12,7 +12,7 @@ public record AppProperties(boolean demoMode, boolean botEnabled, String botToke
                             Path storageDir, boolean pricingConfirmed, CostRates rates,
                             PromotionPolicy promotion, Map<String, Material> materials,
                             String contact, String termsUrl, String privacyUrl, String paymentInstructions,
-                            PrinterProfile printer) {
+                            PrinterProfile printer, PromotionPolicy secondaryPromotion) {
     @ConstructorBinding
     public AppProperties {
         if (adminIds == null) {
@@ -30,6 +30,6 @@ public record AppProperties(boolean demoMode, boolean botEnabled, String botToke
                          PromotionPolicy promotion, Map<String, Material> materials,
                          String contact, String termsUrl, String privacyUrl, String paymentInstructions) {
         this(demoMode, botEnabled, botToken, adminIds, storageDir, pricingConfirmed, rates, promotion,
-                materials, contact, termsUrl, privacyUrl, paymentInstructions, null);
+                materials, contact, termsUrl, privacyUrl, paymentInstructions, null, null);
     }
 }

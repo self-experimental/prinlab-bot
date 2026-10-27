@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import ru.printlab.order.OrderService;
+import ru.printlab.order.ModelingService;
 import tools.jackson.databind.JsonNode;
 
 @Component
@@ -17,14 +18,16 @@ public class BotScheduler {
     private final UpdateProcessor processor;
     private final OutboxWorker outbox;
     private final OrderService orders;
+    private final ModelingService modeling;
 
     public BotScheduler(TelegramGateway gateway, UpdateDao updates, UpdateProcessor processor,
-                        OutboxWorker outbox, OrderService orders) {
+                        OutboxWorker outbox, OrderService orders, ModelingService modeling) {
         this.gateway = gateway;
         this.updates = updates;
         this.processor = processor;
         this.outbox = outbox;
         this.orders = orders;
+        this.modeling = modeling;
     }
 
     @Scheduled(fixedDelay = 1500)
@@ -40,6 +43,7 @@ public class BotScheduler {
 
     @Scheduled(fixedDelay = 500)
     public void deliver() {
+        modeling.receipts();
         for (int i = 0; i < 10; i++) {
             if (!outbox.deliverOne()) {
                 break;

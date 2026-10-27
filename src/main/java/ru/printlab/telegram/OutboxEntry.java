@@ -1,4 +1,6 @@
 package ru.printlab.telegram;
 
-public record OutboxEntry(long id, String method, String payload, int attempts) {
+import java.util.UUID;
+
+public record OutboxEntry(long id, String method, String payload, int attempts, UUID orderId) {
 }

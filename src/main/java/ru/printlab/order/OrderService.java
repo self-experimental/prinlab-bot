@@ -4,8 +4,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.printlab.common.BusinessException;
 import ru.printlab.common.Money;
+import ru.printlab.catalog.ColorService;
+import ru.printlab.catalog.FilamentColor;
 import ru.printlab.config.AppProperties;
 import ru.printlab.config.Material;
+import ru.printlab.config.PromotionPolicy;
 import ru.printlab.pricing.Estimate;
 import ru.printlab.pricing.PricingService;
 import ru.printlab.pricing.PricingSnapshot;
@@ -42,11 +45,13 @@ public class OrderService {
     private final SlicingDao slicing;
     private final SlicerProperties slicerProperties;
     private final OperatorAccess operators;
+    private final ColorService colors;
+    private final DeliveryDao deliveries;
 
     public OrderService(OrderDao orders, PaymentDao payments, PricingService pricing, PromotionService promotions,
                         PromotionDao reservations, AppProperties properties, ModelStorage storage,
                         Notifications notifications, Clock clock, SlicingDao slicing, SlicerProperties slicerProperties,
-                        OperatorAccess operators) {
+                        OperatorAccess operators, ColorService colors, DeliveryDao deliveries) {
         this.orders = orders;
         this.payments = payments;
         this.pricing = pricing;
@@ -59,6 +64,8 @@ public class OrderService {
         this.slicing = slicing;
         this.slicerProperties = slicerProperties;
         this.operators = operators;
+        this.colors = colors;
+        this.deliveries = deliveries;
     }
 
     public boolean isAdmin(long user) {
@@ -74,7 +81,7 @@ public class OrderService {
     public PrintOrder newDraft(long user) {
         orders.lock();
         if (!orders.consented(user)) {
-            throw new BusinessException("Сначала ознакомьтесь с условиями: /start, затем нажмите «Принимаю условия».");
+            throw new BusinessException("Открой главное меню и нажми «Рассчитать печать по STL», чтобы продолжить.");
         }
         PrintOrder draft = orders.draft(user);
         if (draft == null) {
@@ -100,7 +107,14 @@ public class OrderService {
         int infill = order.infill();
         int quantity = order.quantity();
         String promo = order.promoCode();
+        UUID colorId = order.colorId();
+        BigDecimal layer = order.layerHeightMm();
         switch (field) {
+            case "color" -> {
+                FilamentColor selected = colors.available(UUID.fromString(value));
+                colorId = selected.id();
+                material = "pla-black";
+            }
             case "material" -> {
                 Material selected = properties.materials().get(value);
                 if (selected == null || !selected.available()) {
@@ -110,20 +124,36 @@ public class OrderService {
             }
             case "profile" -> {
                 if (!List.of("STANDARD", "FINE").contains(value)) {
-                    throw new BusinessException("Выберите STANDARD или FINE.");
+                    throw new BusinessException("Выбери стандартную или повышенную детализацию.");
                 }
                 profile = value;
+                layer = new BigDecimal("0.20");
+                if (profile.equals("FINE")) {
+                    layer = new BigDecimal("0.12");
+                }
+            }
+            case "layer" -> {
+                try {
+                    layer = new BigDecimal(value.replace(',', '.'));
+                } catch (NumberFormatException exception) {
+                    throw new BusinessException("Не получилось распознать число. Попробуй ввести его ещё раз.");
+                }
+                if (layer.compareTo(new BigDecimal("0.08")) < 0 || layer.compareTo(new BigDecimal("0.28")) > 0
+                        || layer.stripTrailingZeros().scale() > 2) {
+                    throw new BusinessException("Для нашего принтера подойдёт высота слоя от 0,08 до 0,28 мм, до двух знаков после запятой.");
+                }
+                profile = "CUSTOM";
             }
             case "infill" -> {
                 infill = integer(value);
-                if (!List.of(15, 30, 60).contains(infill)) {
-                    throw new BusinessException("Заполнение: 15, 30 или 60 процентов.");
+                if (infill < 1 || infill > 100) {
+                    throw new BusinessException("Заполнение должно быть целым числом от 1 до 100%.");
                 }
             }
             case "quantity" -> {
                 quantity = integer(value);
                 if (quantity < 1 || quantity > 100) {
-                    throw new BusinessException("Количество: от 1 до 100 штук.");
+                    throw new BusinessException("Можно заказать от 1 до 100 деталей.");
                 }
             }
             case "promo" -> {
@@ -132,12 +162,12 @@ public class OrderService {
                     promo = "";
                 }
                 if (!promo.matches("[A-Z0-9_]{0,20}")) {
-                    throw new BusinessException("Промокод: до 20 латинских букв, цифр или знаков подчёркивания.");
+                    throw new BusinessException("В промокоде может быть до 20 латинских букв, цифр или знаков подчёркивания.");
                 }
             }
             default -> throw new BusinessException("Неизвестная настройка.");
         }
-        orders.options(id, material, profile, infill, quantity, promo);
+        orders.options(id, material, profile, infill, quantity, promo, colorId, layer);
         return orders.get(id);
     }
 
@@ -148,20 +178,21 @@ public class OrderService {
             return;
         }
         order.status().require(OrderStatus.DRAFT);
-        if (order.modelId() == null || order.materialId() == null) {
-            throw new BusinessException("Загрузите STL и выберите материал.");
+        if (order.modelId() == null || order.materialId() == null || order.colorId() == null) {
+            throw new BusinessException("Сначала загрузи STL и выбери доступный цвет.");
         }
+        colors.available(order.colorId());
         Material material = properties.materials().get(order.materialId());
         if (material == null || !material.available()) {
-            throw new BusinessException("Выбранный материал закончился. Выберите другой в черновике.");
+            throw new BusinessException("Этот материал закончился. Выбери другой цвет в параметрах заказа.");
         }
         change(order, user, OrderStatus.ESTIMATING, "Клиент отправил заявку");
         ModelFile model = orders.model(order.modelId());
-        notifications.fileToAdmins(model.telegramFileId(), "Заказ №" + order.number() + "\n" + summary(order));
+        notifications.fileToAdmins(order, model.telegramFileId(), "Заказ №" + order.number() + "\n" + summary(order));
         if (slicerProperties.enabled()) {
             slicing.enqueue(order.id(), clock.instant());
             notifications.admins("Новая заявка №" + order.number() + " отправлена на автоматический расчёт.");
-            notifications.text(user, "Модель отправлена на автоматический расчёт. Время печати и расход получим из профиля принтера.");
+            notifications.text(user, "Считаем стоимость заказа №" + order.number() + ". Обычно это занимает несколько минут. Как только расчёт будет готов, пришлём результат сюда.");
             if (order.quantity() > 1) {
                 notifications.text(user, "Расчёт тиража: каждое изделие печатается на отдельной пластине. "
                         + "Совместное размещение и пересчёт можно согласовать с оператором до оплаты.");
@@ -173,7 +204,7 @@ public class OrderService {
         notifications.admins("Новая заявка №" + order.number() + ". Проверьте размеры, ориентацию, поддержки и весь тираж в слайсере.\n"
                 + "Ввод: /slice " + order.number() + " граммы минутыПечати минутыПодготовки минутыОбработки отходыГ стоимостьДоставки ценаДоставки [пластин]\n"
                 + "Без доставки и дополнительных отходов: /slice " + order.number()
-                + " 75 210\nЭто 75 г и 210 минут печати. Все величины — на весь тираж.");
+                + " 75 210\nЭто 75 г и 210 минут печати. Все величины относятся ко всему тиражу.");
     }
 
     public Quote estimate(long admin, long number, Estimate estimate) {
@@ -200,18 +231,22 @@ public class OrderService {
             throw new BusinessException("Число пластин не может превышать число изделий в этом заказе.");
         }
         boolean newCustomer = orders.paidCount(order.customerId()) == 0;
-        PricingSnapshot candidate = pricing.calculate(order.materialId(), estimate, newCustomer, true, "");
+        PromotionPolicy policy = promotions.policy(order.promoCode());
+        PricingSnapshot candidate = pricing.calculate(order.materialId(), estimate, newCustomer, true, "", policy);
         Instant now = clock.instant();
-        PromotionResult promotion = promotions.check(order, newCustomer, candidate.publicPrice().discount(), now);
-        PricingSnapshot snapshot = pricing.calculate(order.materialId(), estimate, newCustomer, promotion.applied(), promotion.note());
+        PromotionResult promotion = promotions.check(order, candidate.publicPrice().discount(), now);
+        PricingSnapshot snapshot = pricing.calculate(order.materialId(), estimate, newCustomer, promotion.applied(), promotion.note(), policy);
+        if (order.colorId() != null) {
+            snapshot = snapshot.withColor(colors.historical(order.colorId()));
+        }
         Instant expires = now.plus(properties.rates().quoteHours(), ChronoUnit.HOURS);
-        if (promotion.applied() && properties.promotion().endsAt().isBefore(expires)) {
-            expires = properties.promotion().endsAt();
+        if (promotion.applied() && policy.endsAt().isBefore(expires)) {
+            expires = policy.endsAt();
         }
         Quote quote = new Quote(UUID.randomUUID(), order.id(), expires, snapshot, null, null);
         reservations.release(order.id());
         if (promotion.applied()) {
-            reservations.reserve(order.id(), order.customerId(), properties.promotion().code(), snapshot.publicPrice().discount(), expires);
+            reservations.reserve(order.id(), order.customerId(), policy.code(), snapshot.publicPrice().discount(), expires);
         }
         OrderStatus status = OrderStatus.QUOTE_READY;
         if (snapshot.economics().needsReview()) {
@@ -219,9 +254,9 @@ public class OrderService {
         }
         orders.saveQuote(quote, status);
         orders.event(order.id(), admin, "ESTIMATED", "Тариф " + snapshot.tariffVersion(), now);
-        notifications.admins(internalSummary(order, quote));
+        notifications.adminOrder(orders.get(order.id()), internalSummary(order, quote));
         if (status == OrderStatus.REVIEW_REQUIRED) {
-            notifications.text(order.customerId(), "Заказ №" + order.number() + ": оператор уточняет условия. Цена пока не согласована.");
+            notifications.text(order.customerId(), "Заказ №" + order.number() + ": уточняем стоимость. Как только всё проверим, пришлём расчёт сюда.");
         } else {
             notifications.quote(order, quote);
         }
@@ -248,25 +283,27 @@ public class OrderService {
         Quote quote = orders.quote(quoteId);
         PrintOrder order = owned(user, quote.orderId());
         if (!quoteId.equals(order.quoteId())) {
-            throw new BusinessException("Это старое предложение. Откройте /orders и подтвердите актуальную цену.");
+            throw new BusinessException("Этот расчёт уже неактуален. Открой заказ заново и проверь итоговую сумму.");
         }
         if (order.status() == OrderStatus.AWAITING_PAYMENT) {
             active(quote);
             return;
         }
         order.status().require(OrderStatus.QUOTE_READY);
+        DeliveryDetails delivery = deliveries.get(order.id());
+        if (delivery == null || !quote.id().equals(delivery.pricedQuoteId())) {
+            throw new BusinessException("Сначала выбери доставку. Мы рассчитаем её стоимость и пришлём итоговую сумму.");
+        }
         active(quote);
         checkReservation(order, quote);
         if (quote.snapshot().economics().needsReview() && quote.approvedBy() == null) {
-            throw new BusinessException("Дождитесь согласования оператором.");
+            throw new BusinessException("Дождись согласования команды PrintLab.");
         }
         orders.status(order.id(), OrderStatus.AWAITING_PAYMENT);
         orders.event(order.id(), user, "ACCEPTED", quote.id().toString(), clock.instant());
-        notifications.text(user, "Заказ №" + order.number() + " подтверждён. К оплате "
-                + Money.format(quote.snapshot().publicPrice().total()) + ".\n" + properties.paymentInstructions()
-                + "\nОплатите до срока из предложения. Если срок прошёл, сначала запросите новый расчёт."
-                + "\nПосле перевода оператор проверит поступление. Вопросы: " + properties.contact());
-        notifications.admins("Клиент подтвердил заказ №" + order.number() + ". Ожидается оплата.");
+        notifications.text(user, "Заказ №" + order.number() + " ожидает оплаты.\n\nСкоро команда PrintLab пришлёт тебе реквизиты в этом чате.\n\nКогда деньги поступят, мы подтвердим оплату и обновим статус здесь.");
+        notifications.adminOrder(orders.get(order.id()), "Клиент подтвердил заказ №" + order.number()
+                + ". Ожидается оплата.\n\nПришлите реквизиты через «Ответить клиенту».\n" + delivery.summary());
     }
 
     public void paid(long admin, long number, BigDecimal amount, String reference) {
@@ -299,7 +336,8 @@ public class OrderService {
         payments.paid(order, amount, reference, orders.customerId(admin), clock.instant());
         reservations.redeem(order.id());
         orders.event(order.id(), admin, "PAID", reference, clock.instant());
-        notifications.text(order.customerId(), "Оплата заказа №" + number + " подтверждена. Заказ в очереди на печать.");
+        notifications.text(order.customerId(), "Оплата заказа №" + number + " подтверждена! Скоро сообщим примерный срок готовности.");
+        notifications.adminOrder(orders.get(order.id()), "Оплата заказа №" + number + " учтена.");
     }
 
     public void production(long admin, long number, OrderStatus status) {
@@ -311,6 +349,61 @@ public class OrderService {
         }
         order.status().requireProductionTransition(status);
         change(order, admin, status, "Обновление производства");
+    }
+
+    public void delivery(long user, UUID id, String method, String fullName, String phone, String address) {
+        orders.lock();
+        PrintOrder order = owned(user, id);
+        order.status().require(OrderStatus.QUOTE_READY);
+        active(orders.quote(order.quoteId()));
+        if (!List.of("COURIER", "PICKUP").contains(method) || fullName.isBlank() || fullName.length() > 200
+                || !phone.matches("\\+[1-9][0-9]{9,14}") || address.isBlank() || address.length() > 1000) {
+            throw new BusinessException("Проверь ФИО, телефон с кодом страны и полный адрес доставки.");
+        }
+        DeliveryDetails delivery = new DeliveryDetails(id, method, fullName, phone, address, null);
+        deliveries.save(delivery);
+        orders.event(id, user, "DELIVERY_DETAILS", delivery.summary(), clock.instant());
+        notifications.buttons(user, "Данные получили! Рассчитаем доставку вручную и пришлём итоговую стоимость сюда.", List.of(
+                Notifications.button("Изменить доставку", "shipping:" + id),
+                Notifications.button("Мои заказы", "nav:orders"), Notifications.button("В меню", "nav:home")));
+        notifications.adminOrder(order, "Нужно рассчитать доставку заказа №" + order.number() + ".\n\n" + delivery.summary());
+    }
+
+    public Quote priceDelivery(long admin, UUID id, UUID expectedQuote, BigDecimal amount) {
+        requireAdmin(admin);
+        orders.lock();
+        PrintOrder order = orders.get(id);
+        order.status().require(OrderStatus.QUOTE_READY, OrderStatus.REVIEW_REQUIRED);
+        if (!expectedQuote.equals(order.quoteId())) {
+            throw new BusinessException("Расчёт уже изменился. Открой заказ заново.");
+        }
+        Quote previous = orders.quote(expectedQuote);
+        active(previous);
+        checkReservation(order, previous);
+        DeliveryDetails delivery = deliveries.get(id);
+        if (delivery == null) {
+            throw new BusinessException("Клиент пока не прислал данные доставки.");
+        }
+        Money.nonNegative(amount, "Доставка");
+        if (amount.scale() > 2 || amount.compareTo(new BigDecimal("100000")) > 0) {
+            throw new BusinessException("Стоимость доставки: от 0 до 100000 ₽, до двух знаков после запятой.");
+        }
+        PricingSnapshot snapshot = pricing.withDelivery(previous.snapshot(), amount);
+        Quote quote = new Quote(UUID.randomUUID(), id, previous.expiresAt(), snapshot, null, null);
+        OrderStatus status = OrderStatus.QUOTE_READY;
+        if (snapshot.economics().needsReview()) {
+            status = OrderStatus.REVIEW_REQUIRED;
+        }
+        orders.saveQuote(quote, status);
+        deliveries.priced(id, quote.id());
+        orders.event(id, admin, "DELIVERY_PRICED", amount.toPlainString(), clock.instant());
+        notifications.adminOrder(orders.get(id), internalSummary(order, quote));
+        if (status == OrderStatus.QUOTE_READY) {
+            notifications.quote(order, quote);
+        } else {
+            notifications.text(order.customerId(), "Доставку рассчитали. Команда PrintLab проверит итоговую стоимость и пришлёт её сюда.");
+        }
+        return quote;
     }
 
     public void cancel(long actor, UUID orderId) {
@@ -338,7 +431,7 @@ public class OrderService {
             return;
         }
         order.status().require(OrderStatus.PAID, OrderStatus.PRINTING, OrderStatus.QUALITY_CHECK,
-                OrderStatus.READY, OrderStatus.COMPLETED);
+                OrderStatus.READY, OrderStatus.SHIPPED, OrderStatus.COMPLETED);
         if (payments.referenceUsed(refundReference)) {
             throw new BusinessException("Идентификатор перевода уже использован.");
         }
@@ -379,16 +472,20 @@ public class OrderService {
     }
 
     public String summary(PrintOrder order) {
-        String material = "не выбран";
-        if (order.materialId() != null) {
-            Material configured = properties.materials().get(order.materialId());
-            material = order.materialId();
-            if (configured != null) {
-                material = configured.label();
+        String color = "не выбран";
+        if (order.colorId() != null) {
+            if (order.quoteId() != null && orders.quote(order.quoteId()).snapshot().color() != null) {
+                color = orders.quote(order.quoteId()).snapshot().color().label();
+            } else {
+                color = colors.historical(order.colorId()).label();
             }
         }
-        return "Материал: " + material + "\nПрофиль: " + order.profile() + "\nЗаполнение: " + order.infill()
-                + "%\nКоличество: " + order.quantity() + " шт.\nПромокод: " + order.promoCode();
+        String promo = order.promoCode();
+        if (promo.isBlank()) {
+            promo = "не указан";
+        }
+        return "Цвет: " + color + "\nВысота слоя: " + order.layerHeightMm().toPlainString().replace('.', ',') + " мм\nЗаполнение: " + order.infill()
+                + "%\nКоличество: " + order.quantity() + " шт.\nПромокод: " + promo;
     }
 
     public String internalSummary(PrintOrder order, Quote quote) {
@@ -424,21 +521,31 @@ public class OrderService {
 
     private void checkReservation(PrintOrder order, Quote quote) {
         if (quote.snapshot().publicPrice().discount().signum() > 0
-                && (!reservations.hasReservation(order.id(), clock.instant()) || orders.paidCount(order.customerId()) > 0)) {
+                && !reservations.hasReservation(order.id(), clock.instant())) {
             throw new BusinessException("Резерв акции недействителен. Оператор должен сформировать новое предложение.");
         }
     }
 
     private void active(Quote quote) {
         if (!clock.instant().isBefore(quote.expiresAt())) {
-            throw new BusinessException("Срок предложения истёк. Попросите оператора пересчитать заказ.");
+            throw new BusinessException("Срок расчёта истёк. Напиши нам, пересчитаем заказ.");
         }
     }
 
     private void change(PrintOrder order, long actor, OrderStatus status, String detail) {
         orders.status(order.id(), status);
         orders.event(order.id(), actor, status.name(), detail, clock.instant());
-        notifications.text(order.customerId(), "Заказ №" + order.number() + ": " + status.label() + ".");
+        String text = "Заказ №" + order.number();
+        switch (status) {
+            case ESTIMATING -> { return; }
+            case PRINTING -> text += " в работе.";
+            case READY -> text += " готов к отправке.";
+            case SHIPPED -> text += " отправлен СДЭК.";
+            case COMPLETED -> text += " выполнен. Спасибо, что выбрал PrintLab!";
+            case CANCELLED -> text += " отменён.";
+            default -> text += ": " + status.label() + ".";
+        }
+        notifications.text(order.customerId(), text);
     }
 
     private void reference(String value) {
@@ -457,7 +564,7 @@ public class OrderService {
         try {
             return Integer.parseInt(value);
         } catch (NumberFormatException exception) {
-            throw new BusinessException("Нужно целое число.");
+            throw new BusinessException("Не получилось распознать число. Попробуй ввести его ещё раз.");
         }
     }
 }

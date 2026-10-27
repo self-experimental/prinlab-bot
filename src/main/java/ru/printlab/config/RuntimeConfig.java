@@ -66,12 +66,12 @@ public class RuntimeConfig {
                 throw new IllegalStateException("Цена материала должна быть положительной");
             }
         }
-        PromotionPolicy promo = properties.promotion();
-        fraction(promo.rate());
-        Money.nonNegative(promo.maxDiscount(), "Лимит скидки");
-        Money.nonNegative(promo.budget(), "Бюджет акции");
-        if (promo.maxPaidOrders() < 1 || promo.endsAt() == null || !promo.code().matches("[A-Z0-9_]{1,20}")) {
-            throw new IllegalStateException("Некорректные условия акции");
+        promotion(properties.promotion());
+        if (properties.secondaryPromotion() != null) {
+            promotion(properties.secondaryPromotion());
+            if (properties.secondaryPromotion().code().equals(properties.promotion().code())) {
+                throw new IllegalStateException("Промокоды двух этапов должны различаться");
+            }
         }
         if (properties.botEnabled()) {
             if (properties.demoMode() || !properties.pricingConfirmed() || properties.botToken().isBlank()
@@ -90,6 +90,19 @@ public class RuntimeConfig {
     private static void fraction(BigDecimal value) {
         if (value == null || value.signum() < 0 || value.compareTo(BigDecimal.ONE) >= 0) {
             throw new IllegalStateException("Ставка должна быть долей от 0 включительно до 1 исключительно");
+        }
+    }
+
+    private static void promotion(PromotionPolicy promo) {
+        fraction(promo.rate());
+        if (promo.maxDiscount() != null) {
+            Money.nonNegative(promo.maxDiscount(), "Лимит скидки");
+        }
+        if (promo.budget() != null) {
+            Money.nonNegative(promo.budget(), "Бюджет акции");
+        }
+        if (promo.maxPaidOrders() < 1 || promo.endsAt() == null || !promo.code().matches("[A-Z0-9_]{1,20}")) {
+            throw new IllegalStateException("Некорректные условия акции");
         }
     }
 

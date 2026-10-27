@@ -53,7 +53,7 @@ public class DemoRunner implements ApplicationRunner {
                 endsolid demo
                 """;
         PrintOrder order = service.attach(222, "demo-file-id", "demo.stl", stl.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        service.configure(222, order.id(), "material", "pla-black");
+        service.configure(222, order.id(), "color", "00000000-0000-4000-8000-000000000001");
         service.configure(222, order.id(), "promo", "FIRST50");
         service.submit(222, order.id());
         Estimate example = new Estimate(new BigDecimal("75"), BigDecimal.ZERO, new BigDecimal("210"),
@@ -61,6 +61,11 @@ public class DemoRunner implements ApplicationRunner {
         Quote quote = service.estimate(111, order.number(), example);
         if (quote.snapshot().economics().needsReview()) {
             service.approve(111, order.number(), "Демонстрация финансового согласования, не реальный заказ");
+        }
+        service.delivery(222, order.id(), "PICKUP", "Тестовый Получатель", "+79991234567", "Демонстрационный ПВЗ СДЭК");
+        quote = service.priceDelivery(111, order.id(), quote.id(), BigDecimal.ZERO);
+        if (quote.snapshot().economics().needsReview()) {
+            service.approve(111, order.number(), "Демонстрация доставки, не реальный заказ");
         }
         service.accept(222, quote.id());
         service.paid(111, order.number(), quote.snapshot().publicPrice().total(), "DEMO-PAYMENT");

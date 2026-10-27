@@ -37,11 +37,11 @@ public class TelegramHttpGateway implements TelegramGateway {
     }
 
     @Override
-    public void deliver(String method, String payload) {
+    public JsonNode deliver(String method, String payload) {
         if (!OUTGOING.contains(method)) {
             throw new IllegalArgumentException("Unsupported outgoing method");
         }
-        request(method, payload);
+        return request(method, payload);
     }
 
     private JsonNode request(String method, String payload) {
@@ -80,7 +80,7 @@ public class TelegramHttpGateway implements TelegramGateway {
     public byte[] download(String fileId) {
         JsonNode file = request("getFile", json.write(Map.of("file_id", fileId)));
         if (file.path("file_size").asLong() > StlValidator.MAX_BYTES) {
-            throw new BusinessException("Файл превышает лимит 20 МиБ.");
+            throw new BusinessException("Файл слишком большой. Максимальный размер 20 МБ.");
         }
         String path = file.path("file_path").asText();
         if (!path.matches("[a-zA-Z0-9_./-]+") || path.contains("..") || path.startsWith("/")) {
@@ -96,7 +96,7 @@ public class TelegramHttpGateway implements TelegramGateway {
                 }
                 byte[] bytes = input.readNBytes(StlValidator.MAX_BYTES + 1);
                 if (bytes.length > StlValidator.MAX_BYTES) {
-                    throw new BusinessException("Файл превышает лимит 20 МиБ.");
+                    throw new BusinessException("Файл слишком большой. Максимальный размер 20 МБ.");
                 }
                 return bytes;
             }

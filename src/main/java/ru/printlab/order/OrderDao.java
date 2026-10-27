@@ -10,6 +10,7 @@ import ru.printlab.storage.ModelFile;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -152,13 +153,16 @@ public class OrderDao {
                 .single();
     }
 
-    public void options(UUID id, String material, String profile, int infill, int quantity, String promo) {
-        jdbc.sql("UPDATE orders SET material_id = ?, print_profile = ?, infill = ?, quantity = ?, promo_code = ? WHERE id = ?")
+    public void options(UUID id, String material, String profile, int infill, int quantity, String promo,
+                        UUID colorId, BigDecimal layerHeightMm) {
+        jdbc.sql("UPDATE orders SET material_id = ?, print_profile = ?, infill = ?, quantity = ?, promo_code = ?, color_id = ?, layer_height_mm = ? WHERE id = ?")
                 .param(material)
                 .param(profile)
                 .param(infill)
                 .param(quantity)
                 .param(promo)
+                .param(colorId)
+                .param(layerHeightMm)
                 .param(id)
                 .update();
     }
@@ -243,6 +247,7 @@ public class OrderDao {
                 OrderStatus.valueOf(rs.getString("status")), rs.getObject("model_id", UUID.class),
                 rs.getString("material_id"), rs.getString("print_profile"), rs.getInt("infill"),
                 rs.getInt("quantity"), rs.getString("promo_code"), rs.getObject("quote_id", UUID.class),
-                rs.getTimestamp("created_at").toInstant(), paidAt);
+                rs.getTimestamp("created_at").toInstant(), paidAt, rs.getObject("color_id", UUID.class),
+                rs.getBigDecimal("layer_height_mm"));
     }
 }

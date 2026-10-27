@@ -21,10 +21,10 @@ public class StlValidator {
 
     public ModelDimensions inspect(String name, byte[] bytes) {
         if (name == null || !name.toLowerCase(Locale.ROOT).endsWith(".stl")) {
-            throw new BusinessException("Пришлите файл с расширением .stl.");
+            throw new BusinessException("Для печати нужен STL-файл. Для моделирования можно прислать фото или эскиз.");
         }
         if (bytes.length == 0 || bytes.length > MAX_BYTES) {
-            throw new BusinessException("Размер STL должен быть от 1 байта до 20 МиБ.");
+            throw new BusinessException("Пришли непустой STL-файл размером до 20 МБ.");
         }
         if (bytes.length >= 84) {
             ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);

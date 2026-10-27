@@ -4,9 +4,9 @@ import ru.printlab.common.BusinessException;
 
 public enum OrderStatus {
     DRAFT("Черновик"), MODELING("Моделирование по фото"), ESTIMATING("Проверяем модель"), REVIEW_REQUIRED("Согласование оператором"),
-    QUOTE_READY("Цена готова"), AWAITING_PAYMENT("Ожидаем оплату"), PAID("Оплачен"),
-    PRINTING("Печатается"), QUALITY_CHECK("Проверяем качество"), READY("Готов к выдаче"),
-    COMPLETED("Выдан"), CANCELLED("Отменён"), EXPIRED("Предложение истекло"), REFUNDED("Деньги возвращены");
+    QUOTE_READY("Цена готова"), AWAITING_PAYMENT("Ожидает оплаты"), PAID("Оплачен"),
+    PRINTING("В работе"), QUALITY_CHECK("Проверяем качество"), READY("Готов к отправке"), SHIPPED("Отправлен"),
+    COMPLETED("Выполнен"), CANCELLED("Отменён"), EXPIRED("Срок расчёта истёк"), REFUNDED("Деньги возвращены");
 
     private final String label;
 
@@ -30,9 +30,10 @@ public enum OrderStatus {
     public void requireProductionTransition(OrderStatus next) {
         boolean valid = switch (this) {
             case PAID -> next == PRINTING;
-            case PRINTING -> next == QUALITY_CHECK;
+            case PRINTING -> next == QUALITY_CHECK || next == READY;
             case QUALITY_CHECK -> next == READY || next == PRINTING;
-            case READY -> next == COMPLETED;
+            case READY -> next == SHIPPED || next == COMPLETED;
+            case SHIPPED -> next == COMPLETED;
             default -> false;
         };
         if (!valid) {

@@ -136,10 +136,7 @@ public class CliSlicingEngine implements SlicingEngine {
         if (!(parsed instanceof ObjectNode process)) {
             throw new BusinessException("Неверный формат профиля процесса.");
         }
-        String layerHeight = "0.20";
-        if (order.profile().equals("FINE")) {
-            layerHeight = "0.12";
-        }
+        String layerHeight = order.layerHeightMm().toPlainString();
         process.put("layer_height", layerHeight);
         process.put("sparse_infill_density", order.infill() + "%");
         process.put("enable_support", "1");
