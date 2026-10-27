@@ -6,7 +6,13 @@ import java.util.UUID;
 
 public record PrintOrder(UUID id, long number, UUID customerId, OrderStatus status, UUID modelId,
                          String materialId, String profile, int infill, int quantity, String promoCode,
-                         UUID quoteId, Instant createdAt, Instant paidAt, UUID colorId, BigDecimal layerHeightMm) {
+                         UUID quoteId, Instant createdAt, Instant paidAt, UUID colorId, BigDecimal layerHeightMm, boolean deleted) {
+    public PrintOrder(UUID id, long number, UUID customerId, OrderStatus status, UUID modelId,
+                      String materialId, String profile, int infill, int quantity, String promoCode,
+                      UUID quoteId, Instant createdAt, Instant paidAt, UUID colorId, BigDecimal layerHeightMm) {
+        this(id, number, customerId, status, modelId, materialId, profile, infill, quantity, promoCode,
+                quoteId, createdAt, paidAt, colorId, layerHeightMm, false);
+    }
     public PrintOrder(UUID id, long number, UUID customerId, OrderStatus status, UUID modelId,
                       String materialId, String profile, int infill, int quantity, String promoCode,
                       UUID quoteId, Instant createdAt, Instant paidAt) {

@@ -79,11 +79,16 @@ public class OrderService {
     }
 
     public PrintOrder newDraft(long user) {
+        return newDraft(user, false);
+    }
+
+    public PrintOrder newDraft(long user, boolean fresh) {
         orders.lock();
         if (!orders.consented(user)) {
             throw new BusinessException("Открой главное меню и нажми «Рассчитать печать по STL», чтобы продолжить.");
         }
-        PrintOrder draft = orders.draft(user);
+        PrintOrder draft = null;
+        if (!fresh) draft = orders.draft(user);
         if (draft == null) {
             draft = orders.create(user, clock.instant());
         }
@@ -91,14 +96,25 @@ public class OrderService {
     }
 
     public PrintOrder attach(long user, String fileId, String name, byte[] bytes) {
-        PrintOrder draft = newDraft(user);
-        ModelFile model = storage.save(orders.customerId(user), fileId, name, bytes);
+        return attachTo(user, newDraft(user).id(), fileId, name, bytes);
+    }
+
+    public PrintOrder attachTo(long user, UUID id, String fileId, String name, byte[] bytes) {
+        orders.lock();
+        PrintOrder draft = owned(user, id);
+        draft.status().require(OrderStatus.DRAFT);
+        ModelFile model = storage.save(draft.customerId(), fileId, name, bytes);
         orders.model(draft.id(), model);
         orders.event(draft.id(), user, "MODEL_UPLOADED", model.sha256(), clock.instant());
         return orders.get(draft.id());
     }
 
     public PrintOrder configure(long user, UUID id, String field, String value) {
+        if (field.equals("promo")) {
+            PromotionResult result = applyPromotion(user, id, value);
+            if (!result.applied() && !value.equals("-") && !value.isBlank()) throw new BusinessException(result.note());
+            return orders.get(id);
+        }
         orders.lock();
         PrintOrder order = owned(user, id);
         order.status().require(OrderStatus.DRAFT);
@@ -169,6 +185,58 @@ public class OrderService {
         }
         orders.options(id, material, profile, infill, quantity, promo, colorId, layer);
         return orders.get(id);
+    }
+
+    public PromotionResult applyPromotion(long user, UUID id, String value) {
+        orders.lock();
+        PrintOrder order = owned(user, id);
+        order.status().require(OrderStatus.DRAFT);
+        String code = value.trim().toUpperCase(Locale.ROOT);
+        if (code.equals("-") || code.isBlank()) {
+            reservations.release(id);
+            orders.promo(id, "");
+            return new PromotionResult(false, "Промокод убран.");
+        }
+        if (!code.matches("[A-Z0-9_]{1,20}")) return new PromotionResult(false, "Промокод не найден.");
+        PromotionResult result = promotions.eligibility(order, code, clock.instant());
+        if (result.applied()) {
+            Instant expiry = clock.instant().plus(properties.rates().quoteHours(), ChronoUnit.HOURS);
+            Instant promoEnd = promotions.definition(code).expiresAt();
+            if (promoEnd.isBefore(expiry)) expiry = promoEnd;
+            reservations.reserve(id, order.customerId(), code, BigDecimal.ZERO, expiry);
+            orders.promo(id, code);
+            orders.event(id, user, "PROMO_APPLIED", result.note(), clock.instant());
+        }
+        return result;
+    }
+
+    public void discardDraft(long user, UUID id) {
+        orders.lock();
+        PrintOrder order = owned(user, id);
+        order.status().require(OrderStatus.DRAFT, OrderStatus.MODELING);
+        reservations.release(order.id());
+        orders.status(order.id(), OrderStatus.CANCELLED);
+        orders.deleted(order.id(), true);
+        orders.event(order.id(), user, "DRAFT_DISCARDED", "Новый заказ вместо незавершённого черновика", clock.instant());
+    }
+
+    public void delete(long admin, UUID id) {
+        requireAdmin(admin);
+        orders.lock();
+        PrintOrder order = orders.get(id);
+        if (order.deleted()) return;
+        if (order.paidAt() == null && order.status() != OrderStatus.CANCELLED) cancel(admin, id);
+        orders.deleted(id, true);
+        orders.event(id, admin, "ORDER_DELETED", "Удалён из активного списка с возможностью восстановления", clock.instant());
+    }
+
+    public void restore(long admin, UUID id) {
+        requireAdmin(admin);
+        orders.lock();
+        PrintOrder order = orders.get(id);
+        if (!order.deleted()) return;
+        orders.deleted(id, false);
+        orders.event(id, admin, "ORDER_RESTORED", "Восстановлен из удалённых заказов", clock.instant());
     }
 
     public void submit(long user, UUID id) {
@@ -255,11 +323,7 @@ public class OrderService {
         orders.saveQuote(quote, status);
         orders.event(order.id(), admin, "ESTIMATED", "Тариф " + snapshot.tariffVersion(), now);
         notifications.adminOrder(orders.get(order.id()), internalSummary(order, quote));
-        if (status == OrderStatus.REVIEW_REQUIRED) {
-            notifications.text(order.customerId(), "Заказ №" + order.number() + ": уточняем стоимость. Как только всё проверим, пришлём расчёт сюда.");
-        } else {
-            notifications.quote(order, quote);
-        }
+        notifications.quote(orders.get(order.id()), quote);
         return quote;
     }
 
@@ -354,7 +418,8 @@ public class OrderService {
     public void delivery(long user, UUID id, String method, String fullName, String phone, String address) {
         orders.lock();
         PrintOrder order = owned(user, id);
-        order.status().require(OrderStatus.QUOTE_READY);
+        order.status().require(OrderStatus.QUOTE_READY, OrderStatus.REVIEW_REQUIRED);
+        if (order.quoteId() == null) throw new BusinessException("Сначала нужно рассчитать стоимость печати.");
         active(orders.quote(order.quoteId()));
         if (!List.of("COURIER", "PICKUP").contains(method) || fullName.isBlank() || fullName.length() > 200
                 || !phone.matches("\\+[1-9][0-9]{9,14}") || address.isBlank() || address.length() > 1000) {
@@ -398,11 +463,7 @@ public class OrderService {
         deliveries.priced(id, quote.id());
         orders.event(id, admin, "DELIVERY_PRICED", amount.toPlainString(), clock.instant());
         notifications.adminOrder(orders.get(id), internalSummary(order, quote));
-        if (status == OrderStatus.QUOTE_READY) {
-            notifications.quote(order, quote);
-        } else {
-            notifications.text(order.customerId(), "Доставку рассчитали. Команда PrintLab проверит итоговую стоимость и пришлёт её сюда.");
-        }
+        notifications.quote(orders.get(id), quote);
         return quote;
     }
 
@@ -465,7 +526,7 @@ public class OrderService {
 
     public PrintOrder owned(long user, UUID id) {
         PrintOrder order = orders.get(id);
-        if (!order.customerId().equals(orders.customerId(user))) {
+        if (order.deleted() || !order.customerId().equals(orders.customerId(user))) {
             throw new BusinessException("Заказ не найден.");
         }
         return order;
@@ -520,9 +581,11 @@ public class OrderService {
     }
 
     private void checkReservation(PrintOrder order, Quote quote) {
-        if (quote.snapshot().publicPrice().discount().signum() > 0
-                && !reservations.hasReservation(order.id(), clock.instant())) {
-            throw new BusinessException("Резерв акции недействителен. Оператор должен сформировать новое предложение.");
+        if (quote.snapshot().publicPrice().discount().signum() > 0) {
+            if (!reservations.hasReservation(order.id(), clock.instant()))
+                throw new BusinessException("Резерв акции недействителен. Оператор должен сформировать новое предложение.");
+            PromotionResult eligibility = promotions.eligibility(order, order.promoCode(), clock.instant());
+            if (!eligibility.applied()) throw new BusinessException(eligibility.note() + " Нужен новый расчёт.");
         }
     }
 

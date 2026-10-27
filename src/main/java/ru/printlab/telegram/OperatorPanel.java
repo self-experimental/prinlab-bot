@@ -32,9 +32,10 @@ public class OperatorPanel {
     private final Notifications messages;
     private final TelegramGateway telegram;
     private final Json json;
+    private final PromotionPanel promotions;
 
     public OperatorPanel(OrderService service, OrderDao orders, DeliveryDao deliveries, ModelingService modeling,
-                         ColorService colors, DialogDao dialogs, Notifications messages, TelegramGateway telegram, Json json) {
+                         ColorService colors, DialogDao dialogs, Notifications messages, TelegramGateway telegram, Json json, PromotionPanel promotions) {
         this.service = service;
         this.orders = orders;
         this.deliveries = deliveries;
@@ -44,13 +45,15 @@ public class OperatorPanel {
         this.messages = messages;
         this.telegram = telegram;
         this.json = json;
+        this.promotions = promotions;
     }
 
     public void menu(long user, long chat) {
         service.requireAdmin(user);
         dialogs.clear(user, chat);
         messages.buttons(chat, "Админ-меню PrintLab\n\nВыберите заказ, чтобы ответить клиенту, передать модель или изменить статус.", List.of(
-                button("Заказы", "op:orders"), button("Цвета PLA", "cat:list:0")));
+                button("Заказы", "op:orders"), button("Цвета PLA", "cat:list:0"),
+                button("Промокоды", "pc:list:0"), button("Удалённые заказы", "op:deleted")));
     }
 
     public void list(long user, long chat) {
@@ -69,6 +72,11 @@ public class OperatorPanel {
         service.requireAdmin(user);
         dialogs.clear(user, chat);
         PrintOrder order = orders.get(id);
+        if (order.deleted()) {
+            messages.buttons(chat, "Удалённый заказ №" + order.number() + "\nСтатус: " + order.status().label(), List.of(
+                    button("Восстановить", "op:restore:" + id), button("Назад", "op:deleted")));
+            return;
+        }
         String text = "Заказ №" + order.number() + "\n\nСтатус: " + order.status().label();
         if (order.modelId() != null) {
             text += "\n\nФайл: " + orders.model(order.modelId()).name() + "\n" + service.summary(order);
@@ -92,6 +100,7 @@ public class OperatorPanel {
         if (parts.length < 2) {
             throw stale();
         }
+        if (parts[0].equals("pc")) { promotions.callback(user, chat, data); return; }
         if (parts[0].equals("cat")) {
             catalog(user, chat, parts);
             return;
@@ -102,23 +111,45 @@ public class OperatorPanel {
         switch (parts[1]) {
             case "menu", "cancelInput" -> { menu(user, chat); return; }
             case "orders" -> { list(user, chat); return; }
+            case "deleted" -> {
+                dialogs.clear(user, chat);
+                List<Map<String,String>> buttons = new ArrayList<>();
+                for (PrintOrder deleted : orders.deletedOrders()) buttons.add(button("№" + deleted.number() + " · " + deleted.status().label(), "op:open:" + deleted.id()));
+                buttons.add(button("Назад", "op:menu"));
+                messages.buttons(chat, "Удалённые заказы. Финансовая история сохранена.", buttons);
+                return;
+            }
         }
         if (parts.length != 3) {
             throw stale();
         }
         UUID id = UUID.fromString(parts[2]);
         PrintOrder order = orders.get(id);
+        if (order.deleted() && !List.of("open", "restore", "deleteYes").contains(parts[1]))
+            throw new BusinessException("Заказ удалён. Сначала восстановите его.");
         switch (parts[1]) {
             case "open" -> show(user, chat, id);
             case "reply" -> {
                 dialogs.save(user, chat, "OP_REPLY", null, id, null);
-                prompt(chat, "Напишите сообщение клиенту по заказу №" + order.number() + ".\n\nОно будет отправлено в личный чат с ботом.", id);
+                prompt(chat, "Напишите сообщение или пришлите фото клиенту по заказу №" + order.number() + ".", id);
             }
             case "stl" -> {
                 order.status().require(OrderStatus.MODELING);
                 dialogs.save(user, chat, "OP_STL", null, id, null);
                 prompt(chat, "Пришлите готовый STL файлом для заказа №" + order.number() + ".", id);
             }
+            case "photo" -> {
+                if (order.deleted()) throw new BusinessException("Заказ удалён. Сначала восстановите его.");
+                dialogs.save(user, chat, "OP_PHOTO", null, id, null);
+                prompt(chat, "Пришлите фото клиенту по заказу №" + order.number() + ". Можно отправить фотографию или файл изображения.", id);
+            }
+            case "cancel" -> messages.buttons(chat, "Отменить заказ №" + order.number() + "? Клиент получит уведомление.", List.of(
+                    button("Да, отменить", "op:cancelYes:" + id), button("Назад", "op:open:" + id)));
+            case "cancelYes" -> { service.cancel(user, id); messages.text(chat, "Заказ отменён."); show(user, chat, id); }
+            case "delete" -> messages.buttons(chat, "Удалить заказ №" + order.number() + " из списка? Его можно восстановить в разделе «Удалённые заказы».", List.of(
+                    button("Удалить", "op:deleteYes:" + id), button("Назад", "op:open:" + id)));
+            case "deleteYes" -> { service.delete(user, id); dialogs.clear(user, chat); show(user, chat, id); }
+            case "restore" -> { service.restore(user, id); show(user, chat, id); }
             case "status" -> statuses(chat, order);
             case "paid" -> {
                 order.status().require(OrderStatus.AWAITING_PAYMENT);
@@ -187,17 +218,23 @@ public class OperatorPanel {
         String text = message.path("text").asText("").trim();
         BotDialog dialog = dialogs.get(user, chat);
         UUID replyOrder = dialogs.replyOrder(chat, message.path("reply_to_message").path("message_id").asLong());
-        if (replyOrder != null && (chat < 0 || (dialog != null && dialog.kind().equals("OP_REPLY")))
-                && (dialog == null || dialog.kind().equals("OP_REPLY")) && !text.isBlank() && !text.startsWith("/")) {
-            modeling.reply(user, orders.get(replyOrder).number(), text);
-            dialogs.clear(user, chat);
-            messages.text(chat, "Сообщение отправлено клиенту.");
+        if (replyOrder != null && chat < 0 && dialog == null && !text.startsWith("/")) {
+            sendReply(user, chat, replyOrder, message, false);
             return true;
         }
         if (dialog == null) {
             return false;
         }
-        if (!List.of("COLOR", "OP_STL", "OP_REPLY", "PAYMENT", "DELIVERY_PRICE", "APPROVE").contains(dialog.kind())) {
+        if (dialog.kind().equals("PROMO_EDIT")) return promotions.input(user, chat, text);
+        if (dialog.kind().equals("OP_REPLY") || dialog.kind().equals("OP_PHOTO")) {
+            if ("album".equals(dialog.step()) && !message.path("media_group_id").asText("").equals(dialog.payload())) {
+                dialogs.clear(user, chat);
+                return false;
+            }
+            sendReply(user, chat, dialog.orderId(), message, dialog.kind().equals("OP_PHOTO"));
+            return true;
+        }
+        if (!List.of("COLOR", "OP_STL", "PAYMENT", "DELIVERY_PRICE", "APPROVE").contains(dialog.kind())) {
             return false;
         }
         if (dialog.kind().equals("COLOR")) {
@@ -252,6 +289,29 @@ public class OperatorPanel {
         }
         dialogs.clear(user, chat);
         return true;
+    }
+
+    private void sendReply(long user, long chat, UUID id, JsonNode message, boolean photoOnly) {
+        String text = message.path("text").asText("").trim();
+        if (!photoOnly && !text.isBlank() && !MediaFiles.attachment(message)) {
+            modeling.reply(user, orders.get(id).number(), text);
+            dialogs.clear(user, chat);
+            messages.text(chat, "Сообщение отправлено клиенту.");
+            return;
+        }
+        JsonNode photo = MediaFiles.largestPhoto(message);
+        JsonNode file = message.path("document");
+        if (photo != null) {
+            modeling.replyPhoto(user, id, photo.path("file_id").asText(), false, message.path("caption").asText(""));
+        } else if (message.has("document") && MediaFiles.photo(file.path("file_name").asText(""))) {
+            if (file.path("file_size").asLong() > StlValidator.MAX_BYTES) throw new BusinessException("Фото должно быть размером до 20 МБ.");
+            modeling.replyPhoto(user, id, file.path("file_id").asText(), true, message.path("caption").asText(""));
+        } else {
+            throw new BusinessException("Для отправки фото нужен файл изображения или фотография. Готовый STL отправляйте через кнопку «Готовый STL».");
+        }
+        if (message.has("media_group_id")) dialogs.save(user, chat, "OP_PHOTO", "album", id, message.path("media_group_id").asText());
+        else dialogs.clear(user, chat);
+        messages.text(chat, "Фото отправлено клиенту.");
     }
 
     private void catalog(long user, long chat, String[] parts) {

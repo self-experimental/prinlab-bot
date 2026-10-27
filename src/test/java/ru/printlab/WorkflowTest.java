@@ -55,12 +55,13 @@ class WorkflowTest {
 
     @BeforeEach
     void prepare() {
-        for (String table : List.of("order_messages", "bot_dialogs", "modeling_receipts", "delivery_details", "outbox", "order_actuals", "order_events", "payments", "promotion_reservations",
+        for (String table : List.of("customer_intake", "order_messages", "bot_dialogs", "modeling_receipts", "delivery_details", "outbox", "order_actuals", "order_events", "payments", "promotion_reservations",
                 "slicing_jobs", "quotes", "modeling_photos", "orders", "model_files", "customers")) {
             jdbc.sql("DELETE FROM " + table).update();
         }
         jdbc.sql("DELETE FROM filament_colors WHERE id NOT IN ('00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000003')").update();
         jdbc.sql("UPDATE filament_colors SET available = TRUE, deleted = FALSE").update();
+        jdbc.sql("UPDATE promo_codes SET created_at = '2020-01-01T00:00:00Z', starts_at = '2020-01-01T00:00:00Z', expires_at = '2030-01-01T00:00:00Z', enabled = TRUE, deleted = FALSE, used_users = 0, used_orders = 0").update();
         jdbc.sql("UPDATE bot_cursor SET next_update = 0").update();
         jdbc.sql("DELETE FROM operator_accounts").update();
         jdbc.sql("UPDATE operator_chat SET telegram_chat_id = NULL").update();
@@ -246,8 +247,9 @@ class WorkflowTest {
                 .query(String.class).single();
         JsonNode keyboard = json.read(home, JsonNode.class).path("reply_markup");
         assertThat(keyboard.path("is_persistent").asBoolean()).isTrue();
-        assertThat(keyboard.path("keyboard").size()).isEqualTo(3);
-        assertThat(home).contains(BotText.get("button.print"), BotText.get("button.model"), BotText.get("button.orders"));
+        assertThat(keyboard.path("keyboard").size()).isEqualTo(2);
+        assertThat(home).contains("Новый заказ", "Мои заказы", "Помощь");
+        assertThat(keyboard.toString()).doesNotContain(BotText.get("button.print"), BotText.get("button.model"));
         assertThat(json.read(home, JsonNode.class).path("text").asText()).isEqualTo("""
                 Привет!
                 Мы команда PrintLab и занимаемся 3D-печатью.
@@ -271,6 +273,11 @@ class WorkflowTest {
         send(222, "/quantity -1");
         send(222, "/quantity 3");
         assertThat(orders.draft(222).quantity()).isEqualTo(3);
+        processor.process(update(222, Map.of("document", Map.of("file_id", "reference-png", "file_name", "reference.PNG", "file_size", 100))));
+        assertThat(count("modeling_photos")).isZero();
+        assertThat(orders.list(222, false).getFirst().status()).isEqualTo(OrderStatus.DRAFT);
+        assertThat(customerMessages(222)).contains("Выбрана печать по STL");
+        send(222, BotText.get("button.model"));
         processor.process(update(222, Map.of("document", Map.of("file_id", "reference-png", "file_name", "reference.PNG", "file_size", 100))));
         PrintOrder request = orders.list(222, false).getFirst();
         assertThat(request.status()).isEqualTo(OrderStatus.MODELING);
@@ -336,6 +343,7 @@ class WorkflowTest {
         assertThat(dialogs.get(555, -12345)).isNull();
         groupClick(444, -999, "op:reply:" + order.id());
         assertThat(dialogs.get(444, -999)).isNull();
+        send(333, BotText.get("button.model"));
         processor.process(update(333, Map.of("photo", List.of(Map.of("file_id", "group-photo", "width", 100, "height", 100)))));
         String payload = jdbc.sql("SELECT payload FROM outbox WHERE method = 'sendPhoto'").query(String.class).single();
         assertThat(json.read(payload, JsonNode.class).path("chat_id").asLong()).isEqualTo(-12345);
@@ -417,15 +425,15 @@ class WorkflowTest {
         assertThat(available.snapshot().promotion().code()).isEqualTo("FIRST30");
         PrintOrder usedBoth = submitted(1001, "FIRST30");
         assertThat(service.estimate(111, usedBoth.number(), Fixtures.estimate()).snapshot().publicPrice().discount()).isZero();
-        for (int index = 0; index < 4; index++) {
+        for (int index = 0; index < 7; index++) {
             PrintOrder order = submitted(4000 + index, "FIRST30");
             assertThat(service.estimate(111, order.number(), Fixtures.estimate()).snapshot().publicPrice().discount())
                     .isEqualByComparingTo("165.00");
         }
-        PrintOrder sixth = submitted(5000, "FIRST30");
-        assertThat(service.estimate(111, sixth.number(), Fixtures.estimate()).snapshot().publicPrice().discount()).isZero();
+        PrintOrder ninth = submitted(5000, "FIRST30");
+        assertThat(service.estimate(111, ninth.number(), Fixtures.estimate()).snapshot().publicPrice().discount()).isZero();
         service.cancel(3000, waiting.id());
-        assertThat(service.estimate(111, sixth.number(), Fixtures.estimate()).snapshot().publicPrice().discount())
+        assertThat(service.estimate(111, ninth.number(), Fixtures.estimate()).snapshot().publicPrice().discount())
                 .isEqualByComparingTo("165.00");
     }
 
@@ -595,7 +603,7 @@ class WorkflowTest {
         PrintOrder order = service.attach(user, "stl-file", "part.stl", Fixtures.stl());
         service.configure(user, order.id(), "color", "00000000-0000-4000-8000-000000000001");
         if (!promo.isBlank()) {
-            service.configure(user, order.id(), "promo", promo);
+            orders.promo(order.id(), promo);
         }
         service.submit(user, order.id());
         return orders.get(order.id());

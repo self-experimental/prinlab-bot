@@ -17,7 +17,7 @@ public class ModelingDao {
     }
 
     public UUID pending(UUID customer) {
-        return jdbc.sql("SELECT id FROM orders WHERE customer_id = ? AND status = 'MODELING' ORDER BY number DESC LIMIT 1")
+        return jdbc.sql("SELECT id FROM orders WHERE customer_id = ? AND status = 'MODELING' AND deleted = FALSE ORDER BY number DESC LIMIT 1")
                 .param(customer)
                 .query(UUID.class)
                 .optional()

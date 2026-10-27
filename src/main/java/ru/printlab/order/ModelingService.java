@@ -31,11 +31,16 @@ public class ModelingService {
     }
 
     public PrintOrder request(long user) {
+        return request(user, false);
+    }
+
+    public PrintOrder request(long user, boolean fresh) {
         orders.lock();
         if (!orders.consented(user)) {
             throw new BusinessException("Открой главное меню и нажми «Заказать модель по фото», чтобы продолжить.");
         }
-        var pending = modeling.pending(orders.customerId(user));
+        java.util.UUID pending = null;
+        if (!fresh) pending = modeling.pending(orders.customerId(user));
         if (pending != null) {
             return orders.get(pending);
         }
@@ -46,10 +51,15 @@ public class ModelingService {
     }
 
     public void photo(long user, String fileId, boolean document, String caption) {
+        photoTo(user, request(user).id(), fileId, document, caption);
+    }
+
+    public void photoTo(long user, java.util.UUID id, String fileId, boolean document, String caption) {
         if (fileId == null || fileId.isBlank() || caption.length() > 1024) {
             throw new BusinessException("Пришли фото с описанием до 1024 символов.");
         }
-        PrintOrder order = request(user);
+        PrintOrder order = service.owned(user, id);
+        order.status().require(OrderStatus.MODELING);
         modeling.add(order.id(), new ModelingPhoto(fileId, document, caption), clock.instant());
         modeling.postponeReceipt(order.id(), clock.instant().plusSeconds(3));
         messages.referenceToAdmins(order, fileId, document, "3D-моделирование · заказ №" + order.number());
@@ -60,6 +70,7 @@ public class ModelingService {
         service.requireAdmin(admin);
         orders.lock();
         PrintOrder order = orders.byNumber(number);
+        if (order.deleted()) throw new BusinessException("Заказ удалён. Сначала восстановите его.");
         order.status().require(OrderStatus.MODELING);
         if (modeling.photos(order.id()).isEmpty()) {
             throw new BusinessException("Сначала добавьте фото в заявку.");
@@ -77,6 +88,7 @@ public class ModelingService {
     public void reply(long admin, long number, String text) {
         service.requireAdmin(admin);
         PrintOrder order = orders.byNumber(number);
+        if (order.deleted()) throw new BusinessException("Заказ удалён. Сначала восстановите его.");
         if (text.isBlank() || text.length() > 2000) {
             throw new BusinessException("Сообщение: от 1 до 2000 символов.");
         }
@@ -84,6 +96,25 @@ public class ModelingService {
                 List.of(Notifications.button("Ответить", "question:" + order.id()),
                         Notifications.button("Мои заказы", "nav:orders")), order.id());
         orders.event(order.id(), admin, "OPERATOR_REPLY", text, clock.instant());
+    }
+
+    public void replyPhoto(long admin, java.util.UUID id, String fileId, boolean document, String caption) {
+        service.requireAdmin(admin);
+        PrintOrder order = orders.get(id);
+        if (order.deleted()) throw new BusinessException("Заказ удалён. Сначала восстановите его.");
+        if (caption.length() > 900) throw new BusinessException("Подпись к фото должна быть до 900 символов.");
+        messages.reference(orders.telegramId(order.customerId()), fileId, document,
+                "Команда PrintLab по заказу №" + order.number() + ":\n" + caption, order.id());
+        orders.event(order.id(), admin, "OPERATOR_PHOTO", caption, clock.instant());
+    }
+
+    public void describeTo(long user, java.util.UUID id, String text) {
+        PrintOrder order = service.owned(user, id);
+        order.status().require(OrderStatus.MODELING);
+        if (text.isBlank() || text.length() > 2000) throw new BusinessException("Описание должно быть от 1 до 2000 символов.");
+        orders.event(id, user, "MODELING_DESCRIPTION", text, clock.instant());
+        messages.adminOrder(order, "Дополнение к заявке на моделирование №" + order.number() + ":\n\n" + text);
+        messages.text(user, "Описание добавлено в заявку №" + order.number() + ".");
     }
 
     public boolean describe(long user, String text) {
@@ -124,7 +155,7 @@ public class ModelingService {
         for (java.util.UUID id : modeling.dueReceipts(clock.instant())) {
             PrintOrder order = orders.get(id);
             modeling.removeReceipt(id);
-            if (order.status() == OrderStatus.MODELING) {
+            if (!order.deleted() && order.status() == OrderStatus.MODELING) {
                 messages.buttons(order.customerId(), "Фото получили! Заявка №" + order.number()
                         + " у нас. Если хочешь что-то добавить, присылай ещё фото или напиши сообщение сюда. Команда PrintLab ответит тебе в этом чате.",
                         List.of(Notifications.button("Добавить описание", "describe:" + id),

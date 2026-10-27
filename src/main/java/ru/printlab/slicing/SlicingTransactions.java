@@ -70,7 +70,10 @@ public class SlicingTransactions {
         jobs.finish(job.id(), "FAILED", reason);
         PrintOrder order = orders.get(job.orderId());
         if (order.status() == OrderStatus.ESTIMATING) {
-            messages.text(order.customerId(), "Не удалось завершить расчёт заказа №" + order.number() + ". Команда PrintLab проверит модель и ответит тебе здесь.");
+            orders.status(order.id(), OrderStatus.REVIEW_REQUIRED);
+            orders.event(order.id(), 0, "SLICE_FAILED", reason, clock.instant());
+            messages.buttons(order.customerId(), "Не удалось завершить расчёт заказа №" + order.number() + ". Команда PrintLab проверит модель и ответит тебе здесь.",
+                    java.util.List.of(Notifications.button("Написать сообщение", "question:" + order.id()), Notifications.button("Мои заказы", "nav:orders")));
             messages.adminOrder(order, "Не удалось рассчитать №" + order.number() + ": " + reason + "\nПовтор: /reslice "
                     + order.number() + "; ручной резерв: /slice. Файл отправлен ниже.");
             messages.fileToAdmins(order, orders.model(order.modelId()).telegramFileId(), "Модель заказа №" + order.number());

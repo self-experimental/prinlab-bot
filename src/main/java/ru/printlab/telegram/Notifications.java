@@ -78,18 +78,21 @@ public class Notifications {
     public void operatorOrder(long chat, PrintOrder order, String text) {
         List<Map<String, String>> buttons = new ArrayList<>();
         buttons.add(button("Ответить клиенту", "op:reply:" + order.id()));
+        buttons.add(button("Отправить фото", "op:photo:" + order.id()));
         if (order.status() == OrderStatus.MODELING) {
             buttons.add(button("Готовый STL", "op:stl:" + order.id()));
         }
         buttons.add(button("Изменить статус", "op:status:" + order.id()));
         buttons.add(button("Открыть заказ", "op:open:" + order.id()));
-        if (order.status() == OrderStatus.REVIEW_REQUIRED) {
+        if (order.status() == OrderStatus.REVIEW_REQUIRED && order.quoteId() != null) {
             buttons.add(button("Согласовать цену", "op:approve:" + order.id()));
         }
         DeliveryDetails delivery = deliveries.get(order.id());
         if (delivery != null && (order.status() == OrderStatus.QUOTE_READY || order.status() == OrderStatus.REVIEW_REQUIRED)) {
             buttons.add(button("Указать стоимость доставки", "op:delivery:" + order.id()));
         }
+        if (order.paidAt() == null && order.status() != OrderStatus.CANCELLED) buttons.add(button("Отменить заказ", "op:cancel:" + order.id()));
+        buttons.add(button("Удалить заказ", "op:delete:" + order.id()));
         orderButtons(chat, text, buttons, order.id());
     }
 
@@ -183,7 +186,11 @@ public class Notifications {
                     + "\nИтого: " + Money.format(price.total())
                     + "\n\nПримерный срок готовности сообщим после оплаты."
                     + "\n\nЦена действует до " + expiry + ".\nВсё подходит? Подтверди заказ.";
-            buttons.add(button("Подтвердить заказ", "accept:" + quote.id()));
+            if (quote.snapshot().economics().needsReview() && quote.approvedBy() == null) {
+                text += "\n\nСтоимость рассчитана. Команда PrintLab согласует условия перед подтверждением и оплатой.";
+            } else {
+                buttons.add(button("Подтвердить заказ", "accept:" + quote.id()));
+            }
         } else if (delivery != null) {
             text += "\n\nДанные доставки у нас. Рассчитаем её стоимость вручную и пришлём итоговую сумму сюда.";
             buttons.add(button("Изменить доставку", "shipping:" + order.id()));

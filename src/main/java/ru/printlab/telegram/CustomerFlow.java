@@ -28,9 +28,10 @@ public class CustomerFlow {
     private final DialogDao dialogs;
     private final Json json;
     private final Clock clock;
+    private final IntakeDao intake;
 
     public CustomerFlow(OrderService service, OrderDao orders, ModelingService modeling, ColorService colors,
-                        Notifications messages, DialogDao dialogs, Json json, Clock clock) {
+                        Notifications messages, DialogDao dialogs, Json json, Clock clock, IntakeDao intake) {
         this.service = service;
         this.orders = orders;
         this.modeling = modeling;
@@ -39,13 +40,37 @@ public class CustomerFlow {
         this.dialogs = dialogs;
         this.json = json;
         this.clock = clock;
+        this.intake = intake;
     }
 
     public void home(long user) {
         dialogs.clear(user, user);
-        messages.keyboard(user, BotText.get("home"), List.of(
-                List.of(BotText.get("button.print")), List.of(BotText.get("button.model")),
-                List.of(BotText.get("button.orders"), BotText.get("button.contact"))));
+        intake.clear(user);
+        messages.keyboard(user, BotText.get("home"), List.of(List.of("Новый заказ"), List.of("Мои заказы", "Помощь")));
+    }
+
+    public void newOrder(long user) {
+        List<PrintOrder> editable = orders.editable(user);
+        if (!editable.isEmpty()) {
+            PrintOrder current = editable.getFirst();
+            IntakeDao.Intake active = intake.get(user);
+            if (active != null) {
+                for (PrintOrder candidate : editable) if (candidate.id().equals(active.orderId())) current = candidate;
+            }
+            dialogs.save(user, user, "NEW_CONFIRM", null, current.id(), null);
+            messages.buttons(user, "Ты уже создаёшь заказ. Уверен, что хочешь начать новый? Данные незавершённого черновика будут сброшены.", List.of(
+                    button("Да, создать новый", "newConfirm:" + current.id()),
+                    button("Продолжить текущий заказ", "show:" + current.id()), button("В меню", "nav:home")));
+            return;
+        }
+        newOrderMenu(user);
+    }
+
+    private void newOrderMenu(long user) {
+        dialogs.save(user, user, "NEW_CHOICE", null, null, null);
+        intake.clear(user);
+        messages.buttons(user, "Что хочешь заказать?", List.of(button("Рассчитать печать по STL", "nav:print"),
+                button("Заказать модель по фото", "nav:model"), button("В меню", "nav:home")));
     }
 
     private boolean consent(long user, String action) {
@@ -57,11 +82,14 @@ public class CustomerFlow {
     }
 
     public void print(long user) {
+        BotDialog selected = dialogs.get(user, user);
+        boolean fresh = selected != null && selected.kind().equals("NEW_CHOICE");
         dialogs.clear(user, user);
         if (!consent(user, "print")) {
             return;
         }
-        PrintOrder order = service.newDraft(user);
+        PrintOrder order = service.newDraft(user, fresh);
+        intake.select(user, order.id(), "STL");
         if (order.modelId() != null) {
             draft(user, order);
             return;
@@ -71,15 +99,19 @@ public class CustomerFlow {
     }
 
     public void model(long user) {
+        BotDialog selected = dialogs.get(user, user);
+        boolean fresh = selected != null && selected.kind().equals("NEW_CHOICE");
         dialogs.clear(user, user);
         if (!consent(user, "model")) {
             return;
         }
-        modeling.request(user);
+        PrintOrder request = modeling.request(user, fresh);
+        intake.select(user, request.id(), "PHOTO");
         messages.buttons(user, BotText.get("upload.photo"), List.of(button("Назад в меню", "nav:home")));
     }
 
     public void contact(long user) {
+        intake.clear(user);
         dialogs.clear(user, user);
         messages.buttons(user, "Есть вопрос? Напиши нам, поможем разобраться.", List.of(
                 Map.of("text", "Написать @oilbanana", "url", "https://t.me/oilbanana"),
@@ -88,6 +120,7 @@ public class CustomerFlow {
     }
 
     public void list(long user) {
+        intake.clear(user);
         dialogs.clear(user, user);
         List<Map<String, String>> buttons = new ArrayList<>();
         List<PrintOrder> list = orders.list(user, false);
@@ -103,13 +136,14 @@ public class CustomerFlow {
     }
 
     public void show(long user, UUID id) {
+        intake.clear(user);
         dialogs.clear(user, user);
         PrintOrder order = service.owned(user, id);
         if (order.status() == OrderStatus.DRAFT) {
             draft(user, order);
             return;
         }
-        if (order.status() == OrderStatus.QUOTE_READY) {
+        if (order.status() == OrderStatus.QUOTE_READY || (order.status() == OrderStatus.REVIEW_REQUIRED && order.quoteId() != null)) {
             messages.quote(order, orders.quote(order.quoteId()));
             return;
         }
@@ -121,7 +155,8 @@ public class CustomerFlow {
             text += "\n\nСогласованная сумма: " + Money.format(orders.quote(order.quoteId()).snapshot().publicPrice().total());
         }
         List<Map<String, String>> buttons = new ArrayList<>();
-        buttons.add(button("Задать вопрос", "question:" + id));
+        buttons.add(button("Написать сообщение", "question:" + id));
+        if (order.status() == OrderStatus.MODELING) buttons.add(button("Добавить фото", "photos:" + id));
         if (canCancel(order)) {
             buttons.add(button("Отменить заказ", "cancel:" + id));
         }
@@ -132,6 +167,7 @@ public class CustomerFlow {
 
     public void draft(long user, PrintOrder order) {
         order.status().require(OrderStatus.DRAFT);
+        intake.select(user, order.id(), "STL");
         dialogs.clear(user, user);
         if (order.modelId() == null) {
             print(user);
@@ -152,6 +188,7 @@ public class CustomerFlow {
 
     public void colors(long user, PrintOrder order, int page) {
         service.owned(user, order.id()).status().require(OrderStatus.DRAFT);
+        intake.select(user, order.id(), "STL");
         List<FilamentColor> available = colors.page(true, page);
         List<Map<String, String>> buttons = new ArrayList<>();
         for (int index = 0; index < Math.min(5, available.size()); index++) {
@@ -204,6 +241,7 @@ public class CustomerFlow {
         if (data.startsWith("nav:")) {
             switch (data) {
                 case "nav:home" -> home(user);
+                case "nav:new" -> newOrder(user);
                 case "nav:print" -> print(user);
                 case "nav:model" -> model(user);
                 case "nav:orders" -> list(user);
@@ -232,6 +270,7 @@ public class CustomerFlow {
         if (parts[0].equals("pick")) {
             PrintOrder order = orders.byNumber(Long.parseLong(parts[1]));
             PrintOrder updated = service.configure(user, order.id(), "color", part(parts, 2));
+            intake.select(user, order.id(), "STL");
             FilamentColor color = colors.available(updated.colorId());
             messages.buttons(user, "Выбран цвет: " + color.label() + ".", List.of(
                     button("Продолжить", "step:" + order.id() + ":profile"),
@@ -239,6 +278,14 @@ public class CustomerFlow {
             return;
         }
         UUID id = UUID.fromString(parts[1]);
+        if (parts[0].equals("newConfirm")) {
+            BotDialog pending = dialogs.get(user, user);
+            if (pending == null || !pending.kind().equals("NEW_CONFIRM") || !id.equals(pending.orderId())) throw stale();
+            service.owned(user, id).status().require(OrderStatus.DRAFT, OrderStatus.MODELING);
+            service.discardDraft(user, id);
+            newOrderMenu(user);
+            return;
+        }
         if (parts[0].equals("accept")) {
             service.accept(user, id);
             dialogs.clear(user, user);
@@ -252,10 +299,12 @@ public class CustomerFlow {
             case "cancelYes" -> {
                 service.cancel(user, id);
                 dialogs.clear(user, user);
+                intake.clear(user);
             }
             case "submit" -> {
                 service.submit(user, id);
                 dialogs.clear(user, user);
+                intake.clear(user);
             }
             case "colors" -> colors(user, order, Integer.parseInt(part(parts, 2)));
             case "edit" -> colors(user, order, 0);
@@ -282,13 +331,21 @@ public class CustomerFlow {
                 dialogs.clear(user, user);
                 quantity(user, updated);
             }
+            case "photos" -> {
+                order.status().require(OrderStatus.MODELING);
+                dialogs.clear(user, user);
+                intake.select(user, id, "PHOTO");
+                messages.buttons(user, "Пришли дополнительные фото по заказу №" + order.number() + ".", List.of(button("Мои заказы", "nav:orders"), button("В меню", "nav:home")));
+            }
+            case "promoapply" -> applyPromo(user, order);
             case "question", "describe" -> {
+                intake.clear(user);
                 dialogs.save(user, user, "CHAT", null, id, null);
-                messages.buttons(user, "Напиши сообщение по заказу №" + order.number() + ". Команда PrintLab получит его и ответит тебе здесь.",
+                messages.buttons(user, "Напиши текстовое сообщение по заказу №" + order.number() + ". Команда PrintLab получит его и ответит тебе здесь.",
                         List.of(button("Назад к заказу", "show:" + id), button("В меню", "nav:home")));
             }
             case "ship" -> {
-                order.status().require(OrderStatus.QUOTE_READY);
+                order.status().require(OrderStatus.QUOTE_READY, OrderStatus.REVIEW_REQUIRED);
                 String method = part(parts, 2);
                 if (!List.of("COURIER", "PICKUP").contains(method)) {
                     throw stale();
@@ -297,7 +354,7 @@ public class CustomerFlow {
                 shippingPrompt(user, id, "Напиши полные ФИО получателя.");
             }
             case "shipping" -> {
-                order.status().require(OrderStatus.QUOTE_READY);
+                order.status().require(OrderStatus.QUOTE_READY, OrderStatus.REVIEW_REQUIRED);
                 messages.buttons(user, "Как отправить заказ СДЭК?", List.of(
                         button("Курьером до двери", "ship:" + id + ":COURIER"),
                         button("В пункт выдачи СДЭК", "ship:" + id + ":PICKUP"), button("В меню", "nav:home")));
@@ -310,10 +367,10 @@ public class CustomerFlow {
         order.status().require(OrderStatus.DRAFT);
         String text;
         switch (field) {
-            case "layer" -> text = "Введи высоту слоя от 0,08 до 0,28 мм. Например, 0,16.\n\nЭто диапазон нашего A1 mini с соплом 0,4 мм.";
+            case "layer" -> text = "Введи высоту слоя от 0,08 до 0,28 мм. Например, 0,16.";
             case "infill" -> text = "Введи заполнение целым числом от 1 до 100%. Значения ниже 5% обычно не рекомендуем.";
             case "quantity" -> text = "Введи количество деталей целым числом от 1 до 100.";
-            case "promo" -> text = "Введи промокод. Скидку проверим при расчёте стоимости.";
+            case "promo" -> text = "Введи промокод. Затем нажми «Применить промокод», чтобы проверить его условия.";
             default -> throw stale();
         }
         dialogs.save(user, user, "PARAM", field, order.id(), null);
@@ -326,13 +383,18 @@ public class CustomerFlow {
         messages.buttons(user, text, buttons);
     }
 
+    public boolean waitingForChoice(long user) {
+        BotDialog dialog = dialogs.get(user, user);
+        return dialog != null && List.of("NEW_CONFIRM", "NEW_CHOICE", "LOW_INFILL", "PROMO_CONFIRM").contains(dialog.kind());
+    }
+
     public boolean input(long user, String text, long replyTo) {
+        BotDialog dialog = dialogs.get(user, user);
         UUID replyOrder = dialogs.replyOrder(user, replyTo);
-        if (replyOrder != null) {
+        if (replyOrder != null && dialog == null) {
             modeling.question(user, replyOrder, text);
             return true;
         }
-        BotDialog dialog = dialogs.get(user, user);
         if (dialog == null) {
             return false;
         }
@@ -346,6 +408,14 @@ public class CustomerFlow {
         }
         if (!dialog.kind().equals("PARAM")) {
             return false;
+        }
+        if (dialog.step().equals("promo")) {
+            String code = text.trim().toUpperCase(java.util.Locale.ROOT);
+            dialogs.save(user, user, "PROMO_CONFIRM", null, dialog.orderId(), code);
+            messages.buttons(user, "Промокод: " + code + "\n\nНажми «Применить промокод», чтобы проверить условия.", List.of(
+                    button("Применить промокод", "promoapply:" + dialog.orderId()),
+                    button("Ввести другой", "input:" + dialog.orderId() + ":promo"), button("Продолжить без промокода", "promo:" + dialog.orderId() + ":-")));
+            return true;
         }
         if (dialog.step().equals("infill")) {
             int value;
@@ -379,8 +449,23 @@ public class CustomerFlow {
         return true;
     }
 
+    private void applyPromo(long user, PrintOrder order) {
+        BotDialog pending = dialogs.get(user, user);
+        if (pending == null || !pending.kind().equals("PROMO_CONFIRM") || !order.id().equals(pending.orderId())) throw stale();
+        var result = service.applyPromotion(user, order.id(), pending.payload());
+        if (result.applied()) {
+            messages.text(user, "Промокод принят. " + result.note());
+            draft(user, orders.get(order.id()));
+        } else {
+            dialogs.save(user, user, "PARAM", "promo", order.id(), null);
+            messages.buttons(user, result.note() + "\n\nВведи новый промокод или продолжи без него.", List.of(
+                    button("Ввести другой промокод", "input:" + order.id() + ":promo"),
+                    button("Продолжить без промокода", "promo:" + order.id() + ":-"), button("Назад к заказу", "show:" + order.id())));
+        }
+    }
+
     private void shippingInput(long user, BotDialog dialog, String text) {
-        service.owned(user, dialog.orderId()).status().require(OrderStatus.QUOTE_READY);
+        service.owned(user, dialog.orderId()).status().require(OrderStatus.QUOTE_READY, OrderStatus.REVIEW_REQUIRED);
         JsonNode source = json.read(dialog.payload(), JsonNode.class);
         Map<String, String> values = new LinkedHashMap<>();
         for (String key : List.of("method", "name", "phone")) {

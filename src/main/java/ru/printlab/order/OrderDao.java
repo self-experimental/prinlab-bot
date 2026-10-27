@@ -93,7 +93,7 @@ public class OrderDao {
     }
 
     public PrintOrder draft(long userId) {
-        return jdbc.sql("SELECT * FROM orders WHERE customer_id = ? AND status = 'DRAFT' ORDER BY number DESC LIMIT 1")
+        return jdbc.sql("SELECT * FROM orders WHERE customer_id = ? AND status = 'DRAFT' AND deleted = FALSE ORDER BY number DESC LIMIT 1")
                 .param(customerId(userId))
                 .query(this::mapOrder)
                 .optional()
@@ -118,11 +118,11 @@ public class OrderDao {
 
     public List<PrintOrder> list(long userId, boolean admin) {
         if (admin) {
-            return jdbc.sql("SELECT * FROM orders ORDER BY number DESC LIMIT 15")
+            return jdbc.sql("SELECT * FROM orders WHERE deleted = FALSE ORDER BY number DESC LIMIT 15")
                     .query(this::mapOrder)
                     .list();
         }
-        return jdbc.sql("SELECT * FROM orders WHERE customer_id = ? ORDER BY number DESC LIMIT 15")
+        return jdbc.sql("SELECT * FROM orders WHERE customer_id = ? AND deleted = FALSE ORDER BY number DESC LIMIT 15")
                 .param(customerId(userId))
                 .query(this::mapOrder)
                 .list();
@@ -165,6 +165,24 @@ public class OrderDao {
                 .param(layerHeightMm)
                 .param(id)
                 .update();
+    }
+
+    public List<PrintOrder> editable(long user) {
+        return jdbc.sql("SELECT * FROM orders WHERE customer_id = ? AND deleted = FALSE AND status IN ('DRAFT', 'MODELING') ORDER BY number DESC")
+                .param(customerId(user)).query(this::mapOrder).list();
+    }
+
+    public List<PrintOrder> deletedOrders() {
+        return jdbc.sql("SELECT * FROM orders WHERE deleted = TRUE ORDER BY number DESC LIMIT 20")
+                .query(this::mapOrder).list();
+    }
+
+    public void deleted(UUID id, boolean deleted) {
+        jdbc.sql("UPDATE orders SET deleted = ? WHERE id = ?").param(deleted).param(id).update();
+    }
+
+    public void promo(UUID id, String code) {
+        jdbc.sql("UPDATE orders SET promo_code = ? WHERE id = ?").param(code).param(id).update();
     }
 
     public void status(UUID id, OrderStatus status) {
@@ -231,7 +249,7 @@ public class OrderDao {
     public List<PrintOrder> expired(Instant now) {
         return jdbc.sql("""
                 SELECT o.* FROM orders o JOIN quotes q ON q.id = o.quote_id
-                WHERE o.status IN ('QUOTE_READY', 'REVIEW_REQUIRED', 'AWAITING_PAYMENT') AND q.expires_at <= ?
+                WHERE o.deleted = FALSE AND o.status IN ('QUOTE_READY', 'REVIEW_REQUIRED', 'AWAITING_PAYMENT') AND q.expires_at <= ?
                 """)
                 .param(Timestamp.from(now))
                 .query(this::mapOrder)
@@ -248,6 +266,6 @@ public class OrderDao {
                 rs.getString("material_id"), rs.getString("print_profile"), rs.getInt("infill"),
                 rs.getInt("quantity"), rs.getString("promo_code"), rs.getObject("quote_id", UUID.class),
                 rs.getTimestamp("created_at").toInstant(), paidAt, rs.getObject("color_id", UUID.class),
-                rs.getBigDecimal("layer_height_mm"));
+                rs.getBigDecimal("layer_height_mm"), rs.getBoolean("deleted"));
     }
 }
