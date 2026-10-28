@@ -47,7 +47,7 @@ public class BotCommands {
     public void handle(long user, JsonNode message, String callback) {
         try {
             if (callback != null) {
-                if (callback.startsWith("op:") || callback.startsWith("cat:") || callback.startsWith("pc:")) {
+                if (callback.startsWith("op:") || callback.startsWith("cat:") || callback.startsWith("pc:") || callback.startsWith("cc:")) {
                     panel.callback(user, user, callback);
                 } else {
                     flow.callback(user, callback);
@@ -108,7 +108,7 @@ public class BotCommands {
             if (selected != null && selected.mode().equals("PHOTO") && !text.isBlank()) {
                 modeling.describeTo(user, selected.orderId(), text);
             } else {
-                messages.buttons(user, "Выбери нужный вариант в меню.", java.util.List.of(Notifications.button("Новый заказ", "nav:new"), Notifications.button("Мои заказы", "nav:orders")));
+                messages.buttons(user, "Для продолжения выбери пункт в меню слева от поля сообщения: новый заказ, мои заказы или поддержка.", java.util.List.of(Notifications.button("Новый заказ", "nav:new"), Notifications.button("Мои заказы", "nav:orders")));
             }
         } catch (IllegalArgumentException exception) {
             throw new BusinessException("Эта кнопка уже неактуальна. Открой заказ заново.");
@@ -150,11 +150,13 @@ public class BotCommands {
 
     private void customerMedia(long user, JsonNode message) {
         BotDialog dialog = dialogs.get(user, user);
+        if (dialog != null && dialog.kind().equals("CUSTOM_COLOR"))
+            throw new BusinessException("Напиши цвет текстом и, если знаешь, добавь HEX-код.");
         if (dialog != null && dialog.kind().equals("CHAT"))
             throw new BusinessException("Для того чтобы написать команде, нужно текстовое сообщение.");
         if (flow.waitingForChoice(user)) throw new BusinessException("Сначала выбери действие кнопкой под сообщением.");
         IntakeDao.Intake selected = intake.get(user);
-        if (selected == null) throw new BusinessException("Сначала выбери нужный вариант в меню «Новый заказ» или открой заказ и нажми «Добавить фото».");
+        if (selected == null) throw new BusinessException("Для продолжения выбери «Новый заказ» в меню слева от поля сообщения или открой заказ и нажми «Добавить фото».");
         JsonNode file = message.path("document");
         JsonNode photo = MediaFiles.largestPhoto(message);
         if (selected.mode().equals("STL")) {

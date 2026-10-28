@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.*;
 
 class PromotionWorkflowTest extends BotTestSupport {
     @Test
-    void checkingAndReservingHappensOnlyAfterExplicitApplyAndFailureCanBeSkipped() {
+    void explicitApplyChecksEligibilityWithoutReservingAndFailureCanBeSkipped() {
         PrintOrder order = draft(222);
         click(222, "input:" + order.id() + ":promo");
         send(222, "testdate");
@@ -25,7 +25,7 @@ class PromotionWorkflowTest extends BotTestSupport {
         assertThat(orders.get(order.id()).promoCode()).isEmpty();
         click(222, "promoapply:" + order.id());
         assertThat(orders.get(order.id()).promoCode()).isEqualTo("TESTDATE");
-        assertThat(count("promotion_reservations")).isEqualTo(1);
+        assertThat(count("promotion_reservations")).isZero();
         click(222, "input:" + order.id() + ":promo");
         send(222, "UNKNOWN");
         click(222, "promoapply:" + order.id());
@@ -57,30 +57,20 @@ class PromotionWorkflowTest extends BotTestSupport {
     }
 
     @Test
-    void reservationsProtectTheUserQuotaAndCancellationOrExpiryFreesIt() throws Exception {
+    void unpaidDraftsAndCancelledOrdersDoNotConsumeUserOrOrderQuota() {
         PromoCode code = create("RACE", PromoType.COMBINED, 1, 1, "Мест больше нет");
         PrintOrder left = draft(222);
         PrintOrder right = draft(333);
-        try (var pool = Executors.newFixedThreadPool(2)) {
-            var a = pool.submit(() -> service.applyPromotion(222, left.id(), code.code()));
-            var b = pool.submit(() -> service.applyPromotion(333, right.id(), code.code()));
-            assertThat(List.of(a.get(), b.get())).filteredOn(r -> r.applied()).hasSize(1);
-        }
-        assertThat(count("promotion_reservations")).isEqualTo(1);
-        PrintOrder reserved = left;
-        long actor = 222;
-        PrintOrder waiting = right;
-        long waitingActor = 333;
-        if (orders.get(right.id()).promoCode().equals(code.code())) {
-            reserved = right; actor = 333; waiting = left; waitingActor = 222;
-        }
-        assertThat(service.applyPromotion(waitingActor, waiting.id(), code.code()).note()).isEqualTo("Мест больше нет");
-        service.cancel(actor, reserved.id());
-        assertThat(service.applyPromotion(waitingActor, waiting.id(), code.code()).applied()).isTrue();
-        clock.set(clock.instant().plus(25, ChronoUnit.HOURS));
-        PrintOrder replacement = draft(444);
-        assertThat(service.applyPromotion(444, replacement.id(), code.code()).applied()).isTrue();
-        assertThat(codes.get(code.id()).usedUsers()).isZero();
+        assertThat(service.applyPromotion(222, left.id(), code.code()).applied()).isTrue();
+        assertThat(service.applyPromotion(333, right.id(), code.code()).applied()).isTrue();
+        assertThat(count("promotion_reservations")).isZero();
+        service.cancel(222, left.id());
+        PrintOrder another = draft(222);
+        assertThat(service.applyPromotion(222, another.id(), code.code()).applied()).isTrue();
+        pay(333, right);
+        assertThat(service.applyPromotion(222, another.id(), code.code()).note()).isEqualTo("Мест больше нет");
+        assertThat(codes.get(code.id()).usedUsers()).isEqualTo(1);
+        assertThat(codes.get(code.id()).usedOrders()).isEqualTo(1);
     }
 
     @Test
@@ -99,13 +89,15 @@ class PromotionWorkflowTest extends BotTestSupport {
         assertThat(service.applyPromotion(222, previous.id(), "FIRST30").note()).contains("один промокод");
         assertThat(service.applyPromotion(999, waiting.id(), "FIRST50").applied()).isFalse();
         assertThat(service.applyPromotion(999, waiting.id(), "FIRST30").applied()).isTrue();
+        pay(999, waiting);
         for (long user = 400; user < 407; user++) {
             PrintOrder order = draft(user);
             assertThat(service.applyPromotion(user, order.id(), "FIRST30").applied()).isTrue();
+            pay(user, order);
         }
         PrintOrder ninth = draft(888);
-        assertThat(service.applyPromotion(888, ninth.id(), "FIRST30").note()).contains("места");
-        assertThat(codes.byCode("FIRST30").usedUsers()).isZero();
+        assertThat(service.applyPromotion(888, ninth.id(), "FIRST30").note()).contains("исчерпан");
+        assertThat(codes.byCode("FIRST30").usedUsers()).isEqualTo(8);
     }
 
     @Test

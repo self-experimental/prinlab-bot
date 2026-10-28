@@ -19,15 +19,17 @@ public class AccountingService {
     private final OrderDao orders;
     private final AccountingDao accounting;
     private final PricingService pricing;
+    private final DeliveryDao deliveries;
     private final Json json;
     private final Clock clock;
 
     public AccountingService(OrderService service, OrderDao orders, AccountingDao accounting,
-                             PricingService pricing, Json json, Clock clock) {
+                             PricingService pricing, DeliveryDao deliveries, Json json, Clock clock) {
         this.service = service;
         this.orders = orders;
         this.accounting = accounting;
         this.pricing = pricing;
+        this.deliveries = deliveries;
         this.json = json;
         this.clock = clock;
     }
@@ -42,6 +44,11 @@ public class AccountingService {
             throw new BusinessException("Факт можно записать после подтверждения оплаты.");
         }
         PricingSnapshot snapshot = orders.quote(order.quoteId()).snapshot();
+        DeliveryDetails delivery = deliveries.get(order.id());
+        if (snapshot.rates().materialSaleMultiplier() != null || (delivery != null && delivery.externalPrice() != null)) {
+            consumed = new Estimate(consumed.grams(), consumed.extraWasteGrams(), consumed.printMinutes(),
+                    consumed.setupMinutes(), consumed.finishingMinutes(), BigDecimal.ZERO, BigDecimal.ZERO, consumed.plateCount());
+        }
         CostBreakdown costs = pricing.costs(snapshot.material(), snapshot.rates(), consumed, snapshot.newCustomer(), false);
         BigDecimal total = Money.rub(costs.total().add(extra));
         BigDecimal contribution = Money.rub(snapshot.publicPrice().total().subtract(total)

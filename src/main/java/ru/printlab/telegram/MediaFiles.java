@@ -42,6 +42,6 @@ public final class MediaFiles {
 
     public static boolean attachment(JsonNode message) {
         return message.has("photo") || message.has("document") || message.has("animation") || message.has("video")
-                || message.has("audio") || message.has("voice") || message.has("sticker");
+                || message.has("audio") || message.has("voice") || message.has("video_note") || message.has("sticker");
     }
 }

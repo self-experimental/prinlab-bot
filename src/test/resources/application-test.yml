@@ -15,6 +15,7 @@ printlab:
   # Historical deterministic fixture for the existing lifecycle tests.
   rates:
     version: example-v1
+    material-sale-multiplier: ""
     target-profit-markup: ""
     minimum-profit-markup: 0
     minimum-contribution: 100.00

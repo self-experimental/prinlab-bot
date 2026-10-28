@@ -69,6 +69,10 @@ public class Notifications {
         outbox.add("sendMessage", Map.of("chat_id", chat, "text", text), clock.instant(), orderId);
     }
 
+    public void adminButtons(PrintOrder order, String text, List<Map<String, String>> buttons) {
+        for (long chat : operators.recipients()) orderButtons(chat, text, buttons, order.id());
+    }
+
     public void adminOrder(PrintOrder order, String text) {
         for (long chat : operators.recipients()) {
             operatorOrder(chat, order, text);
@@ -85,15 +89,23 @@ public class Notifications {
         buttons.add(button("Изменить статус", "op:status:" + order.id()));
         buttons.add(button("Открыть заказ", "op:open:" + order.id()));
         if (order.status() == OrderStatus.REVIEW_REQUIRED && order.quoteId() != null) {
-            buttons.add(button("Согласовать цену", "op:approve:" + order.id()));
+            buttons.add(button("Подтвердить цену", "op:publish:" + order.id()));
         }
+        if (order.quoteId() != null && order.paidAt() == null && !order.deleted()
+                && List.of(OrderStatus.REVIEW_REQUIRED, OrderStatus.QUOTE_READY, OrderStatus.AWAITING_PAYMENT).contains(order.status()))
+            buttons.add(button("Изменить цену печати", "op:price:" + order.id()));
         DeliveryDetails delivery = deliveries.get(order.id());
-        if (delivery != null && (order.status() == OrderStatus.QUOTE_READY || order.status() == OrderStatus.REVIEW_REQUIRED)) {
+        if (delivery != null && !delivery.method().equals("SELF_PICKUP") && (order.status() == OrderStatus.QUOTE_READY || order.status() == OrderStatus.REVIEW_REQUIRED)) {
             buttons.add(button("Указать стоимость доставки", "op:delivery:" + order.id()));
         }
         if (order.paidAt() == null && order.status() != OrderStatus.CANCELLED) buttons.add(button("Отменить заказ", "op:cancel:" + order.id()));
         buttons.add(button("Удалить заказ", "op:delete:" + order.id()));
         orderButtons(chat, text, buttons, order.id());
+    }
+
+    public void removeKeyboard(long chat, String text) {
+        outbox.add("sendMessage", Map.of("chat_id", chat, "text", text,
+                "reply_markup", Map.of("remove_keyboard", true)), clock.instant());
     }
 
     public void keyboard(long chat, String text, List<List<String>> buttons) {
@@ -165,43 +177,62 @@ public class Notifications {
         }
     }
 
+    public void receiving(long chat, PrintOrder order) {
+        buttons(chat, "Как хочешь получить заказ?\n\nСамовывоз в Москве бесплатный. Доставку ты оплачиваешь СДЭК отдельно от заказа PrintLab: в приложении, на сайте или при получении.", receivingButtons(order));
+    }
+
+    private List<Map<String, String>> receivingButtons(PrintOrder order) {
+        return List.of(button("Курьером СДЭК", "ship:" + order.id() + ":COURIER"),
+                button("В пункт выдачи СДЭК", "ship:" + order.id() + ":PICKUP"),
+                button("Бесплатный самовывоз в Москве", "pickupList:" + order.id()),
+                button("Написать сообщение", "question:" + order.id()), button("В меню", "nav:home"));
+    }
+
     public void quote(PrintOrder order, Quote quote) {
+        DeliveryDetails delivery = deliveries.get(order.id());
+        long chat = orders.telegramId(order.customerId());
+        if (order.status() == OrderStatus.REVIEW_REQUIRED) {
+            String text = "Модель заказа №" + order.number() + " рассчитана.\n\nОжидай подтверждения заказа командой PrintLab. После него можно будет оплатить заказ.";
+            if (delivery == null) {
+                buttons(chat, text + "\n\nПока выбери, как получить заказ. Самовывоз бесплатный, СДЭК оплачивается отдельно.", receivingButtons(order));
+            } else {
+                buttons(chat, text + "\n\nДанные для получения у нас.", List.of(
+                        button("Изменить способ получения", "shipping:" + order.id()),
+                        button("Написать сообщение", "question:" + order.id()), button("В меню", "nav:home")));
+            }
+            return;
+        }
         PublicPrice price = quote.snapshot().publicPrice();
         String expiry = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm 'МСК'")
                 .withZone(ZoneId.of("Europe/Moscow")).format(quote.expiresAt());
         String text = "Расчёт заказа №" + order.number() + " готов!\n\n"
-                + "Печать: " + Money.format(price.regularPrintPrice()) + "\n"
-                + "Скидка: " + Money.format(price.discount());
-        // Only historical quotes may retain a startup charge.
-        if (price.launchFee().signum() > 0) {
-            text += "\nЗапуск: " + Money.format(price.launchFee());
-        }
-        if (!order.promoCode().isBlank()) {
-            text += "\n" + price.promotionNote();
-        }
-        DeliveryDetails delivery = deliveries.get(order.id());
+                + "Печать: " + Money.format(price.regularPrintPrice()) + "\nСкидка: " + Money.format(price.discount());
+        if (price.launchFee().signum() > 0) text += "\nЗапуск: " + Money.format(price.launchFee());
+        if (!order.promoCode().isBlank()) text += "\n" + price.promotionNote();
         List<Map<String, String>> buttons = new ArrayList<>();
         if (delivery != null && quote.id().equals(delivery.pricedQuoteId())) {
-            text += "\nДоставка до «" + delivery.address() + "»: " + Money.format(price.deliveryPrice())
-                    + "\nИтого: " + Money.format(price.total())
-                    + "\n\nПримерный срок готовности сообщим после оплаты."
-                    + "\n\nЦена действует до " + expiry + ".\nВсё подходит? Подтверди заказ.";
-            if (quote.snapshot().economics().needsReview() && quote.approvedBy() == null) {
-                text += "\n\nСтоимость рассчитана. Команда PrintLab согласует условия перед подтверждением и оплатой.";
+            if (delivery.method().equals("SELF_PICKUP")) {
+                text += "\n\nСамовывоз: " + delivery.address() + "\nСтоимость самовывоза: 0 ₽";
+                var point = ru.printlab.order.ReceivingPoints.get(delivery.pickupKey());
+                buttons.add(Map.of("text", "ссылка на адрес", "url", point.mapUrl()));
+            } else if (delivery.externalPrice() != null) {
+                text += "\n\nСДЭК до «" + delivery.address() + "»: ориентировочно " + Money.format(delivery.externalPrice())
+                        + "\nДоставку ты оплачиваешь СДЭК отдельно: в приложении, на сайте или при получении. В оплату PrintLab она не входит.";
             } else {
-                buttons.add(button("Подтвердить заказ", "accept:" + quote.id()));
+                // Historical offers retain their agreed receipt until explicitly repriced by an operator.
+                text += "\nДоставка до «" + delivery.address() + "»: " + Money.format(price.deliveryPrice());
             }
-        } else if (delivery != null) {
-            text += "\n\nДанные доставки у нас. Рассчитаем её стоимость вручную и пришлём итоговую сумму сюда.";
-            buttons.add(button("Изменить доставку", "shipping:" + order.id()));
+            text += "\n\nК оплате PrintLab: " + Money.format(price.total())
+                    + "\n\nПримерный срок готовности сообщим после оплаты."
+                    + "\n\nЦена подтверждена командой PrintLab и действует до " + expiry + ".\nВсё подходит? Подтверди заказ.";
+            buttons.add(button("Подтвердить заказ", "accept:" + quote.id()));
         } else {
-            text += "\n\nКак отправить заказ СДЭК?";
-            buttons.add(button("Курьером до двери", "ship:" + order.id() + ":COURIER"));
-            buttons.add(button("В пункт выдачи СДЭК", "ship:" + order.id() + ":PICKUP"));
+            text += "\n\nВыбери способ получения. Команда PrintLab проверит его перед подтверждением заказа.";
+            buttons.addAll(receivingButtons(order));
         }
         buttons.add(button("Задать вопрос", "question:" + order.id()));
         buttons.add(button("Отменить заказ", "cancel:" + order.id()));
         buttons.add(button("В меню", "nav:home"));
-        orderButtons(orders.telegramId(order.customerId()), text, buttons, order.id());
+        orderButtons(chat, text, buttons, order.id());
     }
 }

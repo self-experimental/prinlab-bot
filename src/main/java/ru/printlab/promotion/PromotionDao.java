@@ -80,19 +80,19 @@ public class PromotionDao {
     }
 
     public long customerUses(UUID promotion, UUID customer, UUID exceptOrder) {
-        return jdbc.sql("SELECT COUNT(*) FROM promotion_reservations WHERE promotion_id = ? AND customer_id = ? AND order_id <> ?")
+        return jdbc.sql("SELECT COUNT(*) FROM promotion_reservations WHERE promotion_id = ? AND redeemed = TRUE AND customer_id = ? AND order_id <> ?")
                 .param(promotion).param(customer).param(exceptOrder).query(Long.class).single();
     }
 
     public long participants(UUID promotion, UUID exceptOrder) {
-        return jdbc.sql("SELECT COUNT(DISTINCT customer_id) FROM promotion_reservations WHERE promotion_id = ? AND order_id <> ?")
+        return jdbc.sql("SELECT COUNT(DISTINCT customer_id) FROM promotion_reservations WHERE promotion_id = ? AND redeemed = TRUE AND order_id <> ?")
                 .param(promotion).param(exceptOrder).query(Long.class).single();
     }
 
     public boolean campaignUsed(String group, UUID promotion, UUID customer, UUID exceptOrder) {
         return jdbc.sql("""
                 SELECT COUNT(*) FROM promotion_reservations r JOIN promo_codes p ON p.id = r.promotion_id
-                WHERE p.campaign_group = ? AND r.customer_id = ? AND r.order_id <> ? AND p.id <> ?
+                WHERE r.redeemed = TRUE AND p.campaign_group = ? AND r.customer_id = ? AND r.order_id <> ? AND p.id <> ?
                 """)
                 .param(group).param(customer).param(exceptOrder).param(promotion).query(Long.class).single() > 0;
     }

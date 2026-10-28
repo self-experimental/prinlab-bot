@@ -32,7 +32,7 @@ public class PromotionService {
         return new PromotionPolicy(p.enabled() && !p.deleted(), p.code(), p.percent().movePointLeft(2), null, max, null, p.expiresAt());
     }
 
-    // Caller holds business_lock throughout validation and reservation.
+    // Caller holds business_lock; only confirmed paid redemptions consume limits.
     public PromotionResult eligibility(PrintOrder order, String value, Instant now) {
         usage.releaseExpired(now);
         if (value.isBlank() || value.equals("-")) return new PromotionResult(false, "Без промокода");
@@ -51,8 +51,8 @@ public class PromotionService {
         if (p.campaignGroup() != null && !p.campaignGroup().isBlank() && usage.campaignUsed(p.campaignGroup(), p.id(), order.customerId(), order.id()))
             return denied(p, "Можно использовать только один промокод этой акции на человека.");
         if (p.maxUsers() != null && own == 0 && usage.participants(p.id(), order.id()) >= p.maxUsers())
-            return denied(p, "Все места по этому промокоду уже заняты.");
-        return new PromotionResult(true, p.code() + ": скидка " + p.percent().stripTrailingZeros().toPlainString().replace('.', ',') + "% на печать. Доставка без скидки.");
+            return denied(p, "Лимит оплаченных применений этого промокода исчерпан.");
+        return new PromotionResult(true, p.code() + ": скидка " + p.percent().stripTrailingZeros().toPlainString().replace('.', ',') + "% на печать. Доставка оплачивается отдельно.");
     }
 
     public PromotionResult check(PrintOrder order, BigDecimal discount, Instant now) {

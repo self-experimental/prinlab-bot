@@ -27,7 +27,8 @@ public record CostRates(
         Boolean discountLaunchFee,
         Boolean launchFeePerOrder,
         BigDecimal targetProfitMarkup,
-        BigDecimal minimumProfitMarkup) {
+        BigDecimal minimumProfitMarkup,
+        BigDecimal materialSaleMultiplier) {
     @ConstructorBinding
     public CostRates {
         // Old saved quotes did not contain these fields.
@@ -66,6 +67,6 @@ public record CostRates(
         this(version, electricityPerKwh, printerKw, depreciationPerHour, maintenancePerHour, laborPerHour,
                 packaging, acquisitionPerNewCustomer, failureProbability, paymentRate, paymentFixed, taxRate,
                 targetMargin, minimumPrintPrice, minimumContribution, quoteHours,
-                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, false, false, null, BigDecimal.ZERO);
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, false, false, null, BigDecimal.ZERO, null);
     }
 }

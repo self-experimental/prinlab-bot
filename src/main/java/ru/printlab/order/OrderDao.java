@@ -128,6 +128,10 @@ public class OrderDao {
                 .list();
     }
 
+    public void color(UUID orderId, UUID colorId) {
+        jdbc.sql("UPDATE orders SET color_id = ? WHERE id = ?").param(colorId).param(orderId).update();
+    }
+
     public void model(UUID orderId, ModelFile model) {
         jdbc.sql("INSERT INTO model_files(id, customer_id, telegram_file_id, original_name, sha256, storage_name, size_bytes) VALUES (?, ?, ?, ?, ?, ?, ?)")
                 .param(model.id())

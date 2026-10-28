@@ -17,7 +17,7 @@ public class DeliveryDao {
         return jdbc.sql("SELECT * FROM delivery_details WHERE order_id = ?")
                 .param(orderId)
                 .query((rs, row) -> new DeliveryDetails(orderId, rs.getString("method"), rs.getString("full_name"),
-                        rs.getString("phone"), rs.getString("address"), rs.getObject("priced_quote_id", UUID.class)))
+                        rs.getString("phone"), rs.getString("address"), rs.getObject("priced_quote_id", UUID.class), rs.getBigDecimal("external_price"), rs.getString("pickup_key")))
                 .optional()
                 .orElse(null);
     }
@@ -26,14 +26,21 @@ public class DeliveryDao {
         jdbc.sql("DELETE FROM delivery_details WHERE order_id = ?")
                 .param(delivery.orderId())
                 .update();
-        jdbc.sql("INSERT INTO delivery_details(order_id, method, full_name, phone, address, priced_quote_id) VALUES (?, ?, ?, ?, ?, ?)")
+        jdbc.sql("INSERT INTO delivery_details(order_id, method, full_name, phone, address, priced_quote_id, external_price, pickup_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
                 .param(delivery.orderId())
                 .param(delivery.method())
                 .param(delivery.fullName())
                 .param(delivery.phone())
                 .param(delivery.address())
                 .param(delivery.pricedQuoteId())
+                .param(delivery.externalPrice())
+                .param(delivery.pickupKey())
                 .update();
+    }
+
+    public void priced(UUID orderId, UUID quoteId, java.math.BigDecimal amount) {
+        jdbc.sql("UPDATE delivery_details SET priced_quote_id = ?, external_price = ? WHERE order_id = ?")
+                .param(quoteId).param(amount).param(orderId).update();
     }
 
     public void priced(UUID orderId, UUID quoteId) {

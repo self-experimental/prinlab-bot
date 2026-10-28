@@ -47,11 +47,12 @@ public class OrderService {
     private final OperatorAccess operators;
     private final ColorService colors;
     private final DeliveryDao deliveries;
+    private final ru.printlab.catalog.ColorRequestDao colorRequests;
 
     public OrderService(OrderDao orders, PaymentDao payments, PricingService pricing, PromotionService promotions,
                         PromotionDao reservations, AppProperties properties, ModelStorage storage,
                         Notifications notifications, Clock clock, SlicingDao slicing, SlicerProperties slicerProperties,
-                        OperatorAccess operators, ColorService colors, DeliveryDao deliveries) {
+                        OperatorAccess operators, ColorService colors, DeliveryDao deliveries, ru.printlab.catalog.ColorRequestDao colorRequests) {
         this.orders = orders;
         this.payments = payments;
         this.pricing = pricing;
@@ -66,6 +67,7 @@ public class OrderService {
         this.operators = operators;
         this.colors = colors;
         this.deliveries = deliveries;
+        this.colorRequests = colorRequests;
     }
 
     public boolean isAdmin(long user) {
@@ -127,7 +129,7 @@ public class OrderService {
         BigDecimal layer = order.layerHeightMm();
         switch (field) {
             case "color" -> {
-                FilamentColor selected = colors.available(UUID.fromString(value));
+                FilamentColor selected = selectedColor(order, UUID.fromString(value));
                 colorId = selected.id();
                 material = "pla-black";
             }
@@ -184,6 +186,7 @@ public class OrderService {
             default -> throw new BusinessException("Неизвестная настройка.");
         }
         orders.options(id, material, profile, infill, quantity, promo, colorId, layer);
+        if (field.equals("color")) colorRequests.supersede(id);
         return orders.get(id);
     }
 
@@ -200,10 +203,6 @@ public class OrderService {
         if (!code.matches("[A-Z0-9_]{1,20}")) return new PromotionResult(false, "Промокод не найден.");
         PromotionResult result = promotions.eligibility(order, code, clock.instant());
         if (result.applied()) {
-            Instant expiry = clock.instant().plus(properties.rates().quoteHours(), ChronoUnit.HOURS);
-            Instant promoEnd = promotions.definition(code).expiresAt();
-            if (promoEnd.isBefore(expiry)) expiry = promoEnd;
-            reservations.reserve(id, order.customerId(), code, BigDecimal.ZERO, expiry);
             orders.promo(id, code);
             orders.event(id, user, "PROMO_APPLIED", result.note(), clock.instant());
         }
@@ -249,7 +248,7 @@ public class OrderService {
         if (order.modelId() == null || order.materialId() == null || order.colorId() == null) {
             throw new BusinessException("Сначала загрузи STL и выбери доступный цвет.");
         }
-        colors.available(order.colorId());
+        selectedColor(order, order.colorId());
         Material material = properties.materials().get(order.materialId());
         if (material == null || !material.available()) {
             throw new BusinessException("Этот материал закончился. Выбери другой цвет в параметрах заказа.");
@@ -298,29 +297,26 @@ public class OrderService {
         if (estimate.plateCount() > order.quantity()) {
             throw new BusinessException("Число пластин не может превышать число изделий в этом заказе.");
         }
+        // Carrier charges are paid separately and never enter new PrintLab receipts or costs.
+        estimate = new Estimate(estimate.grams(), estimate.extraWasteGrams(), estimate.printMinutes(),
+                estimate.setupMinutes(), estimate.finishingMinutes(), BigDecimal.ZERO, BigDecimal.ZERO, estimate.plateCount());
         boolean newCustomer = orders.paidCount(order.customerId()) == 0;
         PromotionPolicy policy = promotions.policy(order.promoCode());
-        PricingSnapshot candidate = pricing.calculate(order.materialId(), estimate, newCustomer, true, "", policy);
+        Material material = properties.materials().get(order.materialId());
+        FilamentColor color = colors.historical(order.colorId());
+        material = new Material(material.label(), color.costPerKg(), material.available());
+        PricingSnapshot candidate = pricing.calculate(material, estimate, newCustomer, true, "", policy);
         Instant now = clock.instant();
         PromotionResult promotion = promotions.check(order, candidate.publicPrice().discount(), now);
-        PricingSnapshot snapshot = pricing.calculate(order.materialId(), estimate, newCustomer, promotion.applied(), promotion.note(), policy);
-        if (order.colorId() != null) {
-            snapshot = snapshot.withColor(colors.historical(order.colorId()));
-        }
+        PricingSnapshot snapshot = pricing.calculate(material, estimate, newCustomer, promotion.applied(), promotion.note(), policy)
+                .withColor(color);
         Instant expires = now.plus(properties.rates().quoteHours(), ChronoUnit.HOURS);
-        if (promotion.applied() && policy.endsAt().isBefore(expires)) {
-            expires = policy.endsAt();
-        }
+        if (promotion.applied() && policy.endsAt().isBefore(expires)) expires = policy.endsAt();
         Quote quote = new Quote(UUID.randomUUID(), order.id(), expires, snapshot, null, null);
         reservations.release(order.id());
-        if (promotion.applied()) {
-            reservations.reserve(order.id(), order.customerId(), policy.code(), snapshot.publicPrice().discount(), expires);
-        }
-        OrderStatus status = OrderStatus.QUOTE_READY;
-        if (snapshot.economics().needsReview()) {
-            status = OrderStatus.REVIEW_REQUIRED;
-        }
-        orders.saveQuote(quote, status);
+        orders.saveQuote(quote, OrderStatus.REVIEW_REQUIRED);
+        DeliveryDetails delivery = deliveries.get(order.id());
+        if (delivery != null && delivery.externalPrice() != null) deliveries.priced(order.id(), quote.id(), delivery.externalPrice());
         orders.event(order.id(), admin, "ESTIMATED", "Тариф " + snapshot.tariffVersion(), now);
         notifications.adminOrder(orders.get(order.id()), internalSummary(order, quote));
         notifications.quote(orders.get(order.id()), quote);
@@ -333,13 +329,55 @@ public class OrderService {
         orders.lock();
         PrintOrder order = orders.byNumber(number);
         order.status().require(OrderStatus.REVIEW_REQUIRED);
+        if (order.quoteId() == null) throw new BusinessException("Сначала нужно завершить расчёт модели.");
         Quote quote = orders.quote(order.quoteId());
         active(quote);
-        checkReservation(order, quote);
+        checkPromotion(order, quote);
+        DeliveryDetails delivery = deliveries.get(order.id());
+        if (delivery == null || !quote.id().equals(delivery.pricedQuoteId()))
+            throw new BusinessException("Сначала дождитесь способа получения и укажите отдельный тариф СДЭК либо самовывоз.");
+        // Requote a legacy unpaid offer that previously included delivery in our receipt.
+        if (quote.snapshot().publicPrice().deliveryPrice().signum() > 0 || quote.snapshot().costs().delivery().signum() > 0) {
+            BigDecimal carrier = delivery.externalPrice();
+            if (carrier == null) carrier = quote.snapshot().publicPrice().deliveryPrice();
+            quote = new Quote(UUID.randomUUID(), order.id(), quote.expiresAt(), pricing.withDelivery(quote.snapshot(), carrier), null, null);
+            orders.saveQuote(quote, OrderStatus.REVIEW_REQUIRED);
+            deliveries.priced(order.id(), quote.id(), carrier);
+        }
         orders.approve(quote.id(), admin, reason);
         orders.status(order.id(), OrderStatus.QUOTE_READY);
-        orders.event(order.id(), admin, "FINANCIAL_OVERRIDE", reason, clock.instant());
-        notifications.quote(order, quote);
+        orders.event(order.id(), admin, "PRICE_PUBLISHED", reason, clock.instant());
+        notifications.quote(orders.get(order.id()), orders.quote(quote.id()));
+    }
+
+    public Quote editPrice(long admin, UUID id, UUID expected, BigDecimal amount, String reason) {
+        requireAdmin(admin);
+        requireReason(reason);
+        Money.nonNegative(amount, "Цена печати");
+        if (amount.scale() > 2 || amount.compareTo(new BigDecimal("10000000")) > 0)
+            throw new BusinessException("Цена должна быть от 0 до 10000000 ₽, до двух знаков после запятой.");
+        orders.lock();
+        PrintOrder order = orders.get(id);
+        if (order.deleted()) throw new BusinessException("Сначала восстановите заказ.");
+        order.status().require(OrderStatus.REVIEW_REQUIRED, OrderStatus.QUOTE_READY, OrderStatus.AWAITING_PAYMENT);
+        if (!expected.equals(order.quoteId())) throw new BusinessException("Расчёт изменился. Откройте заказ заново.");
+        Quote previous = orders.quote(expected);
+        active(previous);
+        BigDecimal discount = amount.multiply(previous.snapshot().promotion().rate());
+        PromotionResult promotion = promotions.check(order, discount, clock.instant());
+        PricingSnapshot snapshot = pricing.withPrintPrice(previous.snapshot(), amount, promotion.applied(), promotion.note());
+        Quote quote = new Quote(UUID.randomUUID(), id, previous.expiresAt(), snapshot, null, null);
+        orders.saveQuote(quote, OrderStatus.REVIEW_REQUIRED);
+        DeliveryDetails delivery = deliveries.get(id);
+        if (delivery != null && previous.id().equals(delivery.pricedQuoteId())) {
+            BigDecimal carrier = delivery.externalPrice();
+            if (carrier == null) carrier = previous.snapshot().publicPrice().deliveryPrice();
+            deliveries.priced(id, quote.id(), carrier);
+        }
+        orders.event(id, admin, "PRINT_PRICE_EDITED", "Цена до скидки: " + amount.toPlainString() + "; " + reason, clock.instant());
+        notifications.adminOrder(orders.get(id), internalSummary(order, quote));
+        notifications.quote(orders.get(id), quote);
+        return quote;
     }
 
     public void accept(long user, UUID quoteId) {
@@ -359,13 +397,13 @@ public class OrderService {
             throw new BusinessException("Сначала выбери доставку. Мы рассчитаем её стоимость и пришлём итоговую сумму.");
         }
         active(quote);
-        checkReservation(order, quote);
+        checkPromotion(order, quote);
         if (quote.snapshot().economics().needsReview() && quote.approvedBy() == null) {
             throw new BusinessException("Дождись согласования команды PrintLab.");
         }
         orders.status(order.id(), OrderStatus.AWAITING_PAYMENT);
         orders.event(order.id(), user, "ACCEPTED", quote.id().toString(), clock.instant());
-        notifications.text(user, "Заказ №" + order.number() + " ожидает оплаты.\n\nСкоро команда PrintLab пришлёт тебе реквизиты в этом чате.\n\nКогда деньги поступят, мы подтвердим оплату и обновим статус здесь.");
+        notifications.text(user, "Заказ №" + order.number() + " подтверждён командой PrintLab и ожидает оплаты.\n\nСкоро команда PrintLab пришлёт тебе реквизиты в этом чате.\n\nКогда деньги поступят, мы подтвердим оплату и обновим статус здесь.");
         notifications.adminOrder(orders.get(order.id()), "Клиент подтвердил заказ №" + order.number()
                 + ". Ожидается оплата.\n\nПришлите реквизиты через «Ответить клиенту».\n" + delivery.summary());
     }
@@ -396,9 +434,12 @@ public class OrderService {
         }
         order.status().require(OrderStatus.AWAITING_PAYMENT);
         active(quote);
-        checkReservation(order, quote);
+        checkPromotion(order, quote);
         payments.paid(order, amount, reference, orders.customerId(admin), clock.instant());
-        reservations.redeem(order.id());
+        if (quote.snapshot().publicPrice().discount().signum() > 0) {
+            reservations.reserve(order.id(), order.customerId(), order.promoCode(), quote.snapshot().publicPrice().discount(), quote.expiresAt());
+            reservations.redeem(order.id());
+        }
         orders.event(order.id(), admin, "PAID", reference, clock.instant());
         notifications.text(order.customerId(), "Оплата заказа №" + number + " подтверждена! Скоро сообщим примерный срок готовности.");
         notifications.adminOrder(orders.get(order.id()), "Оплата заказа №" + number + " учтена.");
@@ -425,13 +466,42 @@ public class OrderService {
                 || !phone.matches("\\+[1-9][0-9]{9,14}") || address.isBlank() || address.length() > 1000) {
             throw new BusinessException("Проверь ФИО, телефон с кодом страны и полный адрес доставки.");
         }
+        order = unpublishDeliveryChange(order);
         DeliveryDetails delivery = new DeliveryDetails(id, method, fullName, phone, address, null);
         deliveries.save(delivery);
         orders.event(id, user, "DELIVERY_DETAILS", delivery.summary(), clock.instant());
-        notifications.buttons(user, "Данные получили! Рассчитаем доставку вручную и пришлём итоговую стоимость сюда.", List.of(
+        notifications.buttons(user, "Данные получили! Уточним тариф СДЭК и подтвердим цену заказа.\n\nДоставку ты оплачиваешь СДЭК отдельно: в приложении, на сайте или при получении.", List.of(
                 Notifications.button("Изменить доставку", "shipping:" + id),
                 Notifications.button("Мои заказы", "nav:orders"), Notifications.button("В меню", "nav:home")));
         notifications.adminOrder(order, "Нужно рассчитать доставку заказа №" + order.number() + ".\n\n" + delivery.summary());
+    }
+
+    public void selfPickup(long user, UUID id, String key) {
+        orders.lock();
+        PrintOrder order = owned(user, id);
+        order.status().require(OrderStatus.QUOTE_READY, OrderStatus.REVIEW_REQUIRED);
+        if (order.quoteId() == null) throw new BusinessException("Сначала нужно рассчитать модель.");
+        active(orders.quote(order.quoteId()));
+        ReceivingPoints.Point point = ReceivingPoints.get(key);
+        order = unpublishDeliveryChange(order);
+        DeliveryDetails delivery = new DeliveryDetails(id, "SELF_PICKUP", null, null, point.address(), order.quoteId(), BigDecimal.ZERO, key);
+        deliveries.save(delivery);
+        orders.event(id, user, "SELF_PICKUP", key, clock.instant());
+        notifications.adminOrder(order, "Самовывоз заказа №" + order.number() + ".\n\n" + delivery.summary());
+        notifications.buttons(user, "Выбран бесплатный самовывоз: " + point.label() + ".\n" + point.address()
+                + "\n\nОжидай подтверждения заказа командой PrintLab. После него можно будет оплатить заказ.", List.of(
+                java.util.Map.of("text", "ссылка на адрес", "url", point.mapUrl()),
+                Notifications.button("Изменить способ получения", "shipping:" + id), Notifications.button("В меню", "nav:home")));
+    }
+
+    private PrintOrder unpublishDeliveryChange(PrintOrder order) {
+        if (order.status() == OrderStatus.QUOTE_READY) {
+            Quote previous = orders.quote(order.quoteId());
+            Quote quote = new Quote(UUID.randomUUID(), order.id(), previous.expiresAt(), pricing.withDelivery(previous.snapshot(), BigDecimal.ZERO), null, null);
+            orders.saveQuote(quote, OrderStatus.REVIEW_REQUIRED);
+            return orders.get(order.id());
+        }
+        return order;
     }
 
     public Quote priceDelivery(long admin, UUID id, UUID expectedQuote, BigDecimal amount) {
@@ -444,10 +514,10 @@ public class OrderService {
         }
         Quote previous = orders.quote(expectedQuote);
         active(previous);
-        checkReservation(order, previous);
+        checkPromotion(order, previous);
         DeliveryDetails delivery = deliveries.get(id);
-        if (delivery == null) {
-            throw new BusinessException("Клиент пока не прислал данные доставки.");
+        if (delivery == null || delivery.method().equals("SELF_PICKUP")) {
+            throw new BusinessException("Для тарифа СДЭК нужны данные доставки. Самовывоз бесплатный.");
         }
         Money.nonNegative(amount, "Доставка");
         if (amount.scale() > 2 || amount.compareTo(new BigDecimal("100000")) > 0) {
@@ -455,12 +525,8 @@ public class OrderService {
         }
         PricingSnapshot snapshot = pricing.withDelivery(previous.snapshot(), amount);
         Quote quote = new Quote(UUID.randomUUID(), id, previous.expiresAt(), snapshot, null, null);
-        OrderStatus status = OrderStatus.QUOTE_READY;
-        if (snapshot.economics().needsReview()) {
-            status = OrderStatus.REVIEW_REQUIRED;
-        }
-        orders.saveQuote(quote, status);
-        deliveries.priced(id, quote.id());
+        orders.saveQuote(quote, OrderStatus.REVIEW_REQUIRED);
+        deliveries.priced(id, quote.id(), amount);
         orders.event(id, admin, "DELIVERY_PRICED", amount.toPlainString(), clock.instant());
         notifications.adminOrder(orders.get(id), internalSummary(order, quote));
         notifications.quote(orders.get(id), quote);
@@ -559,7 +625,17 @@ public class OrderService {
                 + "\nКомиссия (%): " + Money.format(snapshot.economics().paymentFee())
                 + "; налог: " + Money.format(snapshot.economics().estimatedTax())
                 + "\nМаржинальный доход: " + Money.format(snapshot.economics().contribution())
-                + "; минимум: " + Money.format(snapshot.economics().minimumContribution());
+                + "; ориентир: " + Money.format(snapshot.economics().minimumContribution());
+        text += "\nЭлектричество: " + Money.format(snapshot.costs().electricity())
+                + "; амортизация: " + Money.format(snapshot.costs().depreciation())
+                + "; обслуживание: " + Money.format(snapshot.costs().maintenance())
+                + "\nУпаковка: " + Money.format(snapshot.costs().packaging());
+        if (snapshot.color() != null && snapshot.color().spoolPrice() != null) {
+            text += "\nКатушка: " + Money.format(snapshot.color().spoolPrice()) + " / " + snapshot.color().spoolWeightGrams() + " г"
+                    + "\nРасход пластика с отходами: " + snapshot.estimate().grams().add(snapshot.estimate().extraWasteGrams()).stripTrailingZeros().toPlainString() + " г";
+        }
+        DeliveryDetails delivery = deliveries.get(order.id());
+        if (delivery != null) text += "\n\n" + delivery.summary();
         if (snapshot.economics().profitMarkup() != null) {
             BigDecimal percent = snapshot.economics().profitMarkup().multiply(new BigDecimal("100"));
             BigDecimal minimumPercent = snapshot.economics().minimumProfitMarkup().multiply(new BigDecimal("100"));
@@ -570,20 +646,26 @@ public class OrderService {
                 profitLabel = "Доход печати к полным учтённым затратам (без сбора за запуск)";
             }
             text += "\n" + profitLabel + ": " + Money.rub(percent).toPlainString()
-                    + "%; минимум: " + Money.rub(minimumPercent).toPlainString() + "%"
+                    + "%; ориентир: " + Money.rub(minimumPercent).toPlainString() + "%"
                     + ". Затраты с комиссией и налогом: " + Money.format(snapshot.economics().totalCost());
         }
         if (snapshot.economics().needsReview()) {
-            text += "\nНиже финансового порога. Для осознанного согласования: /approve " + order.number()
+            text += "\nНиже финансового ориентира. Убыток допустим после явного подтверждения цены: /approve " + order.number()
                     + " причина. Можно пересчитать /slice или отменить /cancel " + order.number() + ".";
         }
         return text;
     }
 
-    private void checkReservation(PrintOrder order, Quote quote) {
+    private FilamentColor selectedColor(PrintOrder order, UUID id) {
+        FilamentColor color = colors.get(id);
+        if (!color.available() && !colorRequests.approved(order.id(), id))
+            throw new BusinessException("Этот цвет сейчас недоступен. Выбери другой из каталога.");
+        color.costPerKg();
+        return color;
+    }
+
+    private void checkPromotion(PrintOrder order, Quote quote) {
         if (quote.snapshot().publicPrice().discount().signum() > 0) {
-            if (!reservations.hasReservation(order.id(), clock.instant()))
-                throw new BusinessException("Резерв акции недействителен. Оператор должен сформировать новое предложение.");
             PromotionResult eligibility = promotions.eligibility(order, order.promoCode(), clock.instant());
             if (!eligibility.applied()) throw new BusinessException(eligibility.note() + " Нужен новый расчёт.");
         }

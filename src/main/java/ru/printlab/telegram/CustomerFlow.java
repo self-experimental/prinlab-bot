@@ -29,9 +29,10 @@ public class CustomerFlow {
     private final Json json;
     private final Clock clock;
     private final IntakeDao intake;
+    private final ru.printlab.catalog.CustomColorService customColors;
 
     public CustomerFlow(OrderService service, OrderDao orders, ModelingService modeling, ColorService colors,
-                        Notifications messages, DialogDao dialogs, Json json, Clock clock, IntakeDao intake) {
+                        Notifications messages, DialogDao dialogs, Json json, Clock clock, IntakeDao intake, ru.printlab.catalog.CustomColorService customColors) {
         this.service = service;
         this.orders = orders;
         this.modeling = modeling;
@@ -41,12 +42,13 @@ public class CustomerFlow {
         this.json = json;
         this.clock = clock;
         this.intake = intake;
+        this.customColors = customColors;
     }
 
     public void home(long user) {
         dialogs.clear(user, user);
         intake.clear(user);
-        messages.keyboard(user, BotText.get("home"), List.of(List.of("Новый заказ"), List.of("Мои заказы", "Помощь")));
+        messages.removeKeyboard(user, BotText.get("home") + "\n\nЧтобы начать, выбери «Новый заказ» в меню слева от поля сообщения.");
     }
 
     public void newOrder(long user) {
@@ -170,7 +172,8 @@ public class CustomerFlow {
         intake.select(user, order.id(), "STL");
         dialogs.clear(user, user);
         if (order.modelId() == null) {
-            print(user);
+            messages.buttons(user, BotText.get("upload.stl"), List.of(button("Назад в меню", "nav:home"),
+                    button("Нужна помощь", "nav:contact")));
             return;
         }
         if (order.colorId() == null) {
@@ -202,6 +205,7 @@ public class CustomerFlow {
         if (available.size() > 5) {
             buttons.add(button("Следующая", "colors:" + order.id() + ":" + (page + 1)));
         }
+        buttons.add(button("Предложить свой цвет", "customColor:" + order.id()));
         buttons.add(button("В меню", "nav:home"));
         String text = "Модель получили!\nСейчас печатаем из PLA. Это лёгкий и жёсткий пластик для декора, макетов и бытовых деталей без сильного нагрева.\n\nДоступные цвета";
         if (available.isEmpty()) {
@@ -306,6 +310,12 @@ public class CustomerFlow {
                 dialogs.clear(user, user);
                 intake.clear(user);
             }
+            case "customColor" -> {
+                order.status().require(OrderStatus.DRAFT);
+                intake.clear(user);
+                dialogs.save(user, user, "CUSTOM_COLOR", null, id, null);
+                messages.buttons(user, "Предложи свой цвет и, если знаешь, пришли его HEX-код, например #4A90E2. Команда PrintLab оценит возможность печати этим цветом.", List.of(button("Назад к цветам", "colors:" + id + ":0")));
+            }
             case "colors" -> colors(user, order, Integer.parseInt(part(parts, 2)));
             case "edit" -> colors(user, order, 0);
             case "step" -> {
@@ -355,9 +365,20 @@ public class CustomerFlow {
             }
             case "shipping" -> {
                 order.status().require(OrderStatus.QUOTE_READY, OrderStatus.REVIEW_REQUIRED);
-                messages.buttons(user, "Как отправить заказ СДЭК?", List.of(
-                        button("Курьером до двери", "ship:" + id + ":COURIER"),
-                        button("В пункт выдачи СДЭК", "ship:" + id + ":PICKUP"), button("В меню", "nav:home")));
+                messages.receiving(user, order);
+            }
+            case "pickupList" -> {
+                order.status().require(OrderStatus.QUOTE_READY, OrderStatus.REVIEW_REQUIRED);
+                for (ReceivingPoints.Point point : ReceivingPoints.ALL) {
+                    messages.buttons(user, point.label() + "\n" + point.address() + "\n\nСамовывоз бесплатный.", List.of(
+                            Map.of("text", "ссылка на адрес", "url", point.mapUrl()),
+                            button("Выбрать этот адрес", "pickup:" + order.id() + ":" + point.key())));
+                }
+                messages.buttons(user, "Выбери удобный адрес. Время встречи согласуем после готовности заказа.", List.of(button("Назад", "shipping:" + id)));
+            }
+            case "pickup" -> {
+                service.selfPickup(user, id, part(parts, 2));
+                dialogs.clear(user, user);
             }
             default -> throw stale();
         }
@@ -397,6 +418,11 @@ public class CustomerFlow {
         }
         if (dialog == null) {
             return false;
+        }
+        if (dialog.kind().equals("CUSTOM_COLOR")) {
+            customColors.request(user, dialog.orderId(), text);
+            dialogs.clear(user, user);
+            return true;
         }
         if (dialog.kind().equals("CHAT")) {
             modeling.question(user, dialog.orderId(), text);

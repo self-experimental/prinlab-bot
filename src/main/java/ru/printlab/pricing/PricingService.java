@@ -26,10 +26,14 @@ public class PricingService {
 
     public PricingSnapshot calculate(String materialId, Estimate estimate, boolean newCustomer,
                                      boolean applyPromo, String promotionNote, PromotionPolicy policy) {
+        return calculate(properties.materials().get(materialId), estimate, newCustomer, applyPromo, promotionNote, policy);
+    }
+
+    public PricingSnapshot calculate(Material material, Estimate estimate, boolean newCustomer,
+                                     boolean applyPromo, String promotionNote, PromotionPolicy policy) {
         if (!properties.demoMode() && !properties.pricingConfirmed()) {
             throw new BusinessException("Сначала настройте и подтвердите тарифы: PRICING_CONFIRMED=true.");
         }
-        Material material = properties.materials().get(materialId);
         if (material == null || !material.available()) {
             throw new BusinessException("Материал недоступен. Согласуйте замену.");
         }
@@ -41,7 +45,7 @@ public class PricingService {
             chargedLaunches = 1;
         }
         BigDecimal launchFee = Money.rub(rates.launchFee().multiply(BigDecimal.valueOf(chargedLaunches)));
-        BigDecimal ordinary = ordinaryPrice(costs, rates, estimate, launchFee);
+        BigDecimal ordinary = ordinaryPrice(material, costs, rates, estimate, launchFee);
         BigDecimal discount = Money.ZERO;
         if (applyPromo) {
             BigDecimal discountBase = ordinary;
@@ -61,7 +65,11 @@ public class PricingService {
                 newCustomer, costs, price, economics);
     }
 
-    private BigDecimal ordinaryPrice(CostBreakdown costs, CostRates rates, Estimate estimate, BigDecimal launchFee) {
+    private BigDecimal ordinaryPrice(Material material, CostBreakdown costs, CostRates rates, Estimate estimate, BigDecimal launchFee) {
+        if (rates.materialSaleMultiplier() != null) {
+            return Money.rub(estimate.grams().add(estimate.extraWasteGrams()).multiply(material.costPerKg())
+                    .multiply(rates.materialSaleMultiplier()).divide(new BigDecimal("1000")));
+        }
         BigDecimal ordinary;
         if (rates.targetProfitMarkup() == null) {
             // Historical tariffs used a share of revenue, not a return on all costs.
@@ -92,18 +100,33 @@ public class PricingService {
 
     public PricingSnapshot withDelivery(PricingSnapshot original, BigDecimal deliveryPrice) {
         Money.nonNegative(deliveryPrice, "Доставка");
+        // CDEK receives its fee directly. Keep the carrier quote outside our cost and receipt.
+        PublicPrice previous = original.publicPrice();
+        return replacePrice(original, previous.regularPrintPrice(), previous.discount(), previous.promotionNote());
+    }
+
+    public PricingSnapshot withPrintPrice(PricingSnapshot original, BigDecimal amount, boolean applyPromo, String note) {
+        Money.nonNegative(amount, "Цена печати");
+        BigDecimal discount = Money.ZERO;
+        if (applyPromo) {
+            discount = Money.rub(amount.multiply(original.promotion().rate())).min(amount);
+            if (original.promotion().maxDiscount() != null) discount = discount.min(original.promotion().maxDiscount());
+        }
+        return replacePrice(original, Money.rub(amount), discount, note);
+    }
+
+    private PricingSnapshot replacePrice(PricingSnapshot original, BigDecimal ordinary, BigDecimal discount, String note) {
         Estimate source = original.estimate();
         Estimate estimate = new Estimate(source.grams(), source.extraWasteGrams(), source.printMinutes(),
-                source.setupMinutes(), source.finishingMinutes(), deliveryPrice, deliveryPrice, source.plateCount());
-        CostBreakdown costs = costs(original.material(), original.rates(), estimate, original.newCustomer(), true);
-        PublicPrice previous = original.publicPrice();
-        BigDecimal total = Money.rub(previous.regularPrintPrice().add(previous.launchFee())
-                .subtract(previous.discount()).add(deliveryPrice));
-        PublicPrice price = new PublicPrice(previous.regularPrintPrice(), previous.discount(), Money.rub(deliveryPrice),
-                total, previous.currency(), previous.promotionNote(), previous.launchFee());
+                source.setupMinutes(), source.finishingMinutes(), BigDecimal.ZERO, BigDecimal.ZERO, source.plateCount());
+        CostBreakdown c = original.costs();
+        CostBreakdown costs = new CostBreakdown(c.material(), c.electricity(), c.depreciation(), c.maintenance(),
+                c.setupLabor(), c.finishingLabor(), c.failureReserve(), c.packaging(), c.acquisition(),
+                Money.ZERO, c.fixedPaymentFee(), Money.rub(c.total().subtract(c.delivery())));
+        BigDecimal total = Money.rub(ordinary.subtract(discount));
+        PublicPrice price = new PublicPrice(ordinary, discount, Money.ZERO, total, "RUB", note, Money.ZERO);
         return new PricingSnapshot(original.tariffVersion(), original.material(), original.rates(), original.promotion(),
-                estimate, original.newCustomer(), costs, price, economics(costs, total, original.rates(), previous.launchFee()),
-                original.color());
+                estimate, original.newCustomer(), costs, price, economics(costs, total, original.rates(), Money.ZERO), original.color());
     }
 
     public CostBreakdown costs(Material material, CostRates rates, Estimate estimate,

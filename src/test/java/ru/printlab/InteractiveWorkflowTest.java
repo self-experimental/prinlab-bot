@@ -27,13 +27,13 @@ class InteractiveWorkflowTest extends BotTestSupport {
     }
 
     @Test
-    void aQuoteAwaitingFinancialApprovalStillShowsPricesAndCollectsDelivery() {
+    void aQuoteHidesPricesUntilOperatorApprovalAndCollectsDelivery() {
         PrintOrder order = draft(222);
         assertThat(service.applyPromotion(222, order.id(), "FIRST50").applied()).isTrue();
         service.submit(222, order.id());
         service.estimate(111, order.number(), Fixtures.estimate());
         assertThat(orders.get(order.id()).status()).isEqualTo(OrderStatus.REVIEW_REQUIRED);
-        assertThat(messages(222)).contains("Расчёт заказа", "Печать:", "Скидка:", "Как отправить заказ СДЭК?");
+        assertThat(messages(222)).contains("Ожидай подтверждения", "как получить заказ").doesNotContain("Печать:", "Скидка:");
         click(222, "ship:" + order.id() + ":COURIER");
         send(222, "Тестовый Иван Иванович");
         send(222, "+79991234567");
@@ -42,10 +42,11 @@ class InteractiveWorkflowTest extends BotTestSupport {
         click(111, -12345, "op:delivery:" + order.id());
         group(111, Map.of("text", "350,50"));
         PrintOrder priced = orders.get(order.id());
-        assertThat(messages(222)).contains("Доставка до", "Итого:", "350,50 ₽");
+        assertThat(messages(222)).doesNotContain("Печать:", "350,50 ₽");
         click(222, "accept:" + priced.quoteId());
         assertThat(orders.get(order.id()).status()).isEqualTo(OrderStatus.REVIEW_REQUIRED);
         service.approve(111, order.number(), "Проверка акции");
+        assertThat(messages(222)).contains("Печать:", "350,50 ₽", "К оплате PrintLab");
         click(222, "accept:" + priced.quoteId());
         assertThat(orders.get(order.id()).status()).isEqualTo(OrderStatus.AWAITING_PAYMENT);
     }
@@ -121,6 +122,9 @@ class InteractiveWorkflowTest extends BotTestSupport {
     void startingANewOrderRequiresConfirmationAndOnlyDiscardsItsOwnCurrentDraft() {
         PrintOrder first=draft(222);
         PrintOrder another=service.newDraft(222,true);
+        service.newDraft(222,true);
+        click(222,"show:"+another.id());
+        assertThat(intake.get(222).orderId()).isEqualTo(another.id());
         click(222,"show:"+first.id());
         send(222,"Новый заказ");
         assertThat(orders.get(first.id()).deleted()).isFalse();

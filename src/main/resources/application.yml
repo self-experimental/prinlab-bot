@@ -66,9 +66,10 @@ printlab:
       pla-black: pla.json
       pla-white: pla.json
       petg-black: petg.json
-  # Настройки владельца: PLA 1000 ₽/кг, без отдельного сбора за запуск. Неподтверждённые нормы описаны в docs/economics.md.
+  # Цена пластика хранится у цвета; продажная ставка = закупочный грамм ×10, без сбора за запуск. Неподтверждённые нормы описаны в docs/economics.md.
   rates:
-    version: ${TARIFF_VERSION:a1-mini-v5}
+    version: ${TARIFF_VERSION:a1-mini-v6}
+    material-sale-multiplier: ${MATERIAL_SALE_MULTIPLIER:10}
     electricity-per-kwh: ${ELECTRICITY_PER_KWH:13.00}
     printer-kw: ${PRINTER_KW:0.15}
     # Расчёт: стоимость / ресурс. Ручная почасовая ставка используется только для старых снимков.
@@ -87,7 +88,7 @@ printlab:
     payment-rate: ${PAYMENT_RATE:0.03}
     payment-fixed: ${PAYMENT_FIXED:0.00}
     tax-rate: ${TAX_RATE:0.04}
-    # Доход печати / все учтённые расходы. Сбор за запуск прибавляется сверх этого дохода.
+    # Ориентир для оператора: доход / все учтённые расходы; цену ×10 не повышает.
     target-profit-markup: ${TARGET_PROFIT_MARKUP:0.50}
     minimum-profit-markup: ${MINIMUM_PROFIT_MARKUP:0.50}
     # Только для исторических тарифов без target-profit-markup.

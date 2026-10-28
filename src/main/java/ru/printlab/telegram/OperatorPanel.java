@@ -22,7 +22,7 @@ import static ru.printlab.telegram.Notifications.button;
 
 @Component
 public class OperatorPanel {
-    private static final List<String> COLOR_FIELDS = List.of("name", "surface", "manufacturer", "palette", "article");
+    private static final List<String> COLOR_FIELDS = List.of("name", "surface", "manufacturer", "palette", "article", "price", "grams");
     private final OrderService service;
     private final OrderDao orders;
     private final DeliveryDao deliveries;
@@ -33,9 +33,10 @@ public class OperatorPanel {
     private final TelegramGateway telegram;
     private final Json json;
     private final PromotionPanel promotions;
+    private final CustomColorPanel customColors;
 
     public OperatorPanel(OrderService service, OrderDao orders, DeliveryDao deliveries, ModelingService modeling,
-                         ColorService colors, DialogDao dialogs, Notifications messages, TelegramGateway telegram, Json json, PromotionPanel promotions) {
+                         ColorService colors, DialogDao dialogs, Notifications messages, TelegramGateway telegram, Json json, PromotionPanel promotions, CustomColorPanel customColors) {
         this.service = service;
         this.orders = orders;
         this.deliveries = deliveries;
@@ -46,6 +47,7 @@ public class OperatorPanel {
         this.telegram = telegram;
         this.json = json;
         this.promotions = promotions;
+        this.customColors = customColors;
     }
 
     public void menu(long user, long chat) {
@@ -100,6 +102,7 @@ public class OperatorPanel {
         if (parts.length < 2) {
             throw stale();
         }
+        if (parts[0].equals("cc")) { customColors.callback(user, chat, data); return; }
         if (parts[0].equals("pc")) { promotions.callback(user, chat, data); return; }
         if (parts[0].equals("cat")) {
             catalog(user, chat, parts);
@@ -173,7 +176,29 @@ public class OperatorPanel {
                 }
                 dialogs.save(user, chat, "DELIVERY_PRICE", null, id, order.quoteId().toString());
                 prompt(chat, "Заказ №" + order.number() + "\n\n" + delivery.summary()
-                        + "\n\nВведите стоимость СДЭК в рублях. Эта сумма добавится к заказу без наценки и скидки.", id);
+                        + "\n\nВведите стоимость СДЭК в рублях. Клиент оплачивает её напрямую СДЭК. Она не входит в чек и затраты PrintLab.", id);
+            }
+            case "price" -> {
+                order.status().require(OrderStatus.REVIEW_REQUIRED, OrderStatus.QUOTE_READY, OrderStatus.AWAITING_PAYMENT);
+                if (order.quoteId() == null) throw new BusinessException("Сначала нужно завершить расчёт модели.");
+                dialogs.save(user, chat, "PRICE_EDIT", "amount", id, json.write(Map.of("quote", order.quoteId().toString())));
+                prompt(chat, "Введите цену печати до скидки в рублях. Промокод пересчитается от этой суммы. Минимальной суммы нет.\n\nПосле изменения клиент получит новую цену только после вашего подтверждения. Старое предложение станет недействительным.", id);
+            }
+            case "publish" -> {
+                order.status().require(OrderStatus.REVIEW_REQUIRED);
+                if (order.quoteId() == null) throw new BusinessException("Сначала нужно завершить расчёт модели.");
+                dialogs.save(user, chat, "PRICE_PUBLISH", null, id, order.quoteId().toString());
+                messages.buttons(chat, service.internalSummary(order, orders.quote(order.quoteId()))
+                        + "\n\nПодтвердить эту цену и отправить клиенту? Убыточный заказ тоже можно согласовать.", List.of(
+                        button("Подтвердить и отправить цену", "op:publishConfirm:" + id), button("Назад", "op:open:" + id)));
+            }
+            case "publishConfirm" -> {
+                BotDialog dialog = expected(user, chat, "PRICE_PUBLISH", id);
+                requireQuote(order, dialog.payload());
+                service.approve(user, order.number(), "Цена подтверждена оператором. Плановый результат: "
+                        + Money.format(orders.quote(order.quoteId()).snapshot().economics().contribution()));
+                dialogs.clear(user, chat);
+                messages.text(chat, "Цена подтверждена и отправлена клиенту.");
             }
             case "approve" -> {
                 order.status().require(OrderStatus.REVIEW_REQUIRED);
@@ -224,6 +249,11 @@ public class OperatorPanel {
         }
         if (dialog == null) {
             return false;
+        }
+        if (dialog.kind().equals("CC_EDIT")) return customColors.input(user, chat, text);
+        if (dialog.kind().equals("PRICE_EDIT")) {
+            priceInput(user, chat, dialog, text);
+            return true;
         }
         if (dialog.kind().equals("PROMO_EDIT")) return promotions.input(user, chat, text);
         if (dialog.kind().equals("OP_REPLY") || dialog.kind().equals("OP_PHOTO")) {
@@ -345,7 +375,7 @@ public class OperatorPanel {
             }
             case "skip" -> {
                 BotDialog dialog = dialogs.get(user, chat);
-                if (dialog == null || !dialog.kind().equals("COLOR") || dialog.step().equals("name")) {
+                if (dialog == null || !dialog.kind().equals("COLOR") || List.of("name", "price", "grams").contains(dialog.step())) {
                     throw stale();
                 }
                 colorInput(user, chat, dialog, "");
@@ -384,6 +414,10 @@ public class OperatorPanel {
         String text = "Цвет: " + color.name() + "\nПоверхность: " + display(color.surface())
                 + "\nПроизводитель: " + display(color.manufacturer()) + "\nНомер в палитре: " + display(color.paletteNumber())
                 + "\nАртикул Bambu: " + display(color.bambuArticle());
+        if (color.spoolPrice() != null) {
+            text += "\nЦена катушки: " + Money.format(color.spoolPrice()) + "\nМасса пластика: " + color.spoolWeightGrams() + " г"
+                    + "\nЗакупка 1 г: " + color.costPerKg().divide(new BigDecimal("1000")).stripTrailingZeros().toPlainString().replace('.', ',') + " ₽";
+        } else text += "\nЦена катушки ещё не указана. Цвет скрыт от новых расчётов.";
         String availability = "Скрыть";
         if (!color.available()) {
             availability = "Сделать доступным";
@@ -396,7 +430,7 @@ public class OperatorPanel {
     private void colorInput(long user, long chat, BotDialog dialog, String text) {
         JsonNode source = json.read(dialog.payload(), JsonNode.class);
         Map<String, String> values = new LinkedHashMap<>();
-        for (String key : List.of("id", "available", "name", "surface", "manufacturer", "palette", "article")) {
+        for (String key : List.of("id", "available", "name", "surface", "manufacturer", "palette", "article", "price", "grams")) {
             if (source.has(key)) {
                 values.put(key, source.path(key).asText());
             }
@@ -406,11 +440,24 @@ public class OperatorPanel {
             case "surface" -> 40;
             case "manufacturer" -> 120;
             case "article" -> 160;
+            case "price", "grams" -> 20;
             default -> throw stale();
         };
         if (text.length() > maximum || (dialog.step().equals("name") && text.isBlank())) {
             throw new BusinessException("В этом поле нужно от 1 до " + maximum + " символов.");
         }
+        try {
+            if (dialog.step().equals("price")) {
+                BigDecimal price = new BigDecimal(text.replace(',', '.'));
+                if (price.signum() <= 0 || price.scale() > 2 || price.compareTo(new BigDecimal("1000000")) > 0)
+                    throw new BusinessException("Цена катушки: больше 0 и до 1000000 ₽, до двух знаков после запятой.");
+                text = price.toPlainString();
+            }
+            if (dialog.step().equals("grams")) {
+                int grams = Integer.parseInt(text);
+                if (grams < 1 || grams > 100000) throw new BusinessException("Масса пластика должна быть от 1 до 100000 г.");
+            }
+        } catch (NumberFormatException exception) { throw new BusinessException("Не получилось распознать число. Попробуйте ещё раз."); }
         values.put(dialog.step(), text);
         int next = COLOR_FIELDS.indexOf(dialog.step()) + 1;
         if (next < COLOR_FIELDS.size()) {
@@ -426,7 +473,7 @@ public class OperatorPanel {
             available = Boolean.parseBoolean(values.get("available"));
         }
         FilamentColor color = colors.save(user, new FilamentColor(id, values.get("name"), nullable(values.get("surface")),
-                nullable(values.get("manufacturer")), nullable(values.get("palette")), nullable(values.get("article")), available, false));
+                nullable(values.get("manufacturer")), nullable(values.get("palette")), nullable(values.get("article")), available, false, new BigDecimal(values.get("price")), Integer.parseInt(values.get("grams"))));
         dialogs.clear(user, chat);
         messages.text(chat, "Цвет сохранён.");
         colorCard(chat, color);
@@ -439,10 +486,12 @@ public class OperatorPanel {
             case "manufacturer" -> "Укажите производителя, до 120 символов.";
             case "palette" -> "Укажите номер цвета в палитре, до 80 символов.";
             case "article" -> "Укажите артикул Bambu, если есть. До 160 символов.";
+            case "price" -> "Введите закупочную цену катушки в рублях.";
+            case "grams" -> "Введите массу пластика в катушке в граммах, без самой катушки. Для 1 кг укажите 1000.";
             default -> throw stale();
         };
         List<Map<String, String>> buttons = new ArrayList<>();
-        if (!field.equals("name")) {
+        if (!List.of("name", "price", "grams").contains(field)) {
             buttons.add(button("Пропустить", "cat:skip"));
         }
         buttons.add(button("Отмена", "cat:list:0"));
@@ -451,6 +500,24 @@ public class OperatorPanel {
 
     private void prompt(long chat, String text, UUID orderId) {
         messages.buttons(chat, text, List.of(button("Назад к заказу", "op:open:" + orderId)));
+    }
+
+    private void priceInput(long user, long chat, BotDialog dialog, String text) {
+        if (text.isBlank()) throw new BusinessException("Для изменения цены нужно текстовое сообщение.");
+        JsonNode data = json.read(dialog.payload(), JsonNode.class);
+        if (dialog.step().equals("amount")) {
+            BigDecimal amount;
+            try { amount = new BigDecimal(text.replace(',', '.')); }
+            catch (NumberFormatException e) { throw new BusinessException("Не получилось распознать число. Введите цену ещё раз."); }
+            if (amount.signum() < 0 || amount.scale() > 2 || amount.compareTo(new BigDecimal("10000000")) > 0)
+                throw new BusinessException("Цена: от 0 до 10000000 ₽, до двух знаков после запятой.");
+            dialogs.save(user, chat, "PRICE_EDIT", "reason", dialog.orderId(), json.write(Map.of("quote", data.path("quote").asText(), "amount", amount.toPlainString())));
+            prompt(chat, "Укажите причину изменения цены, от 5 до 500 символов. Она останется в истории заказа.", dialog.orderId());
+        } else {
+            service.editPrice(user, dialog.orderId(), UUID.fromString(data.path("quote").asText()), new BigDecimal(data.path("amount").asText()), text);
+            dialogs.clear(user, chat);
+            messages.text(chat, "Цена сохранена для проверки. Чтобы отправить её клиенту, нажмите «Подтвердить цену».");
+        }
     }
 
     private BotDialog expected(long user, long chat, String kind, UUID orderId) {

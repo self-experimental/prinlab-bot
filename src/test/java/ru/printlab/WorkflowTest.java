@@ -55,12 +55,12 @@ class WorkflowTest {
 
     @BeforeEach
     void prepare() {
-        for (String table : List.of("customer_intake", "order_messages", "bot_dialogs", "modeling_receipts", "delivery_details", "outbox", "order_actuals", "order_events", "payments", "promotion_reservations",
+        for (String table : List.of("color_requests", "customer_intake", "order_messages", "bot_dialogs", "modeling_receipts", "delivery_details", "outbox", "order_actuals", "order_events", "payments", "promotion_reservations",
                 "slicing_jobs", "quotes", "modeling_photos", "orders", "model_files", "customers")) {
             jdbc.sql("DELETE FROM " + table).update();
         }
         jdbc.sql("DELETE FROM filament_colors WHERE id NOT IN ('00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000003')").update();
-        jdbc.sql("UPDATE filament_colors SET available = TRUE, deleted = FALSE").update();
+        jdbc.sql("UPDATE filament_colors SET available = TRUE, deleted = FALSE, spool_price = 1200, spool_weight_grams = 1000").update();
         jdbc.sql("UPDATE promo_codes SET created_at = '2020-01-01T00:00:00Z', starts_at = '2020-01-01T00:00:00Z', expires_at = '2030-01-01T00:00:00Z', enabled = TRUE, deleted = FALSE, used_users = 0, used_orders = 0").update();
         jdbc.sql("UPDATE bot_cursor SET next_update = 0").update();
         jdbc.sql("DELETE FROM operator_accounts").update();
@@ -168,11 +168,11 @@ class WorkflowTest {
         assertThat(orders.quote(orders.get(draft.id()).quoteId()).snapshot().estimate().plateCount()).isEqualTo(1);
         send(111, "/slice " + draft.number() + " 75 210 2");
         PrintOrder priced = orders.get(draft.id());
-        assertThat(priced.status()).isEqualTo(OrderStatus.QUOTE_READY);
+        assertThat(priced.status()).isEqualTo(OrderStatus.REVIEW_REQUIRED);
         assertThat(orders.quote(priced.quoteId()).snapshot().estimate().setupMinutes()).isZero();
         assertThat(orders.quote(priced.quoteId()).snapshot().estimate().plateCount()).isEqualTo(2);
         click(222, "accept:" + priced.quoteId());
-        assertThat(orders.get(priced.id()).status()).isEqualTo(OrderStatus.QUOTE_READY);
+        assertThat(orders.get(priced.id()).status()).isEqualTo(OrderStatus.REVIEW_REQUIRED);
         click(222, "ship:" + priced.id() + ":PICKUP");
         send(222, "Иванов Иван Иванович");
         send(222, "+7 (999) 123-45-67");
@@ -182,11 +182,12 @@ class WorkflowTest {
         groupClick(111, -12345, "op:delivery:" + priced.id());
         group(111, -12345, Map.of("text", "350,50"));
         UUID finalId = orders.get(priced.id()).quoteId();
-        assertThat(orders.quote(finalId).snapshot().publicPrice().total()).isEqualByComparingTo("900.50");
+        assertThat(orders.quote(finalId).snapshot().publicPrice().total()).isEqualByComparingTo("550.00");
         assertThat(orders.quote(finalId).snapshot().publicPrice().regularPrintPrice()).isEqualByComparingTo("550.00");
-        assertThat(orders.quote(finalId).snapshot().costs().delivery()).isEqualByComparingTo("350.50");
+        assertThat(orders.quote(finalId).snapshot().costs().delivery()).isZero();
         click(222, "accept:" + priced.quoteId());
-        assertThat(orders.get(priced.id()).status()).isEqualTo(OrderStatus.QUOTE_READY);
+        assertThat(orders.get(priced.id()).status()).isEqualTo(OrderStatus.REVIEW_REQUIRED);
+        service.approve(111, priced.number(), "Цена и доставка проверены");
         click(222, "accept:" + finalId);
         groupClick(111, -12345, "op:paid:" + priced.id());
         assertThat(count("payments")).isZero();
@@ -202,7 +203,7 @@ class WorkflowTest {
         assertThat(orders.get(priced.id()).status()).isEqualTo(OrderStatus.COMPLETED);
         assertThat(count("payments")).isEqualTo(1);
         assertThat(count("order_actuals")).isEqualTo(1);
-        assertThat(accounting.report(111)).contains("card01", "900,50 ₽");
+        assertThat(accounting.report(111)).contains("card01", "550,00 ₽");
         colors.delete(111, UUID.fromString("00000000-0000-4000-8000-000000000001"));
         assertThat(service.summary(orders.get(priced.id()))).contains("Чёрный");
         assertThat(orders.quote(finalId).snapshot().color().name()).isEqualTo("Чёрный");
@@ -224,13 +225,13 @@ class WorkflowTest {
         PrintOrder order = submitted(222, "FIRST50");
         Quote quote = service.estimate(111, order.number(), Fixtures.estimate());
         assertThat(orders.get(order.id()).status()).isEqualTo(OrderStatus.REVIEW_REQUIRED);
-        assertThat(jdbc.sql("SELECT redeemed FROM promotion_reservations").query(Boolean.class).single()).isFalse();
+        assertThat(count("promotion_reservations")).isZero();
         assertThatThrownBy(() -> service.accept(222, quote.id())).isInstanceOf(BusinessException.class);
         assertThatThrownBy(() -> service.approve(222, order.number(), "Разрешаю тестовую скидку"))
                 .isInstanceOf(BusinessException.class);
-        service.approve(111, order.number(), "Проверка спроса в рамках рекламного бюджета");
-        assertThat(orders.quote(quote.id()).approvedBy()).isEqualTo(orders.customerId(111));
-        service.accept(222, finalQuote(222, quote.id()));
+        UUID finalId = finalQuote(222, quote.id());
+        assertThat(orders.quote(finalId).approvedBy()).isEqualTo(orders.customerId(111));
+        service.accept(222, finalId);
         service.paid(111, order.number(), quote.snapshot().publicPrice().total(), "transfer-promo");
         service.paid(111, order.number(), quote.snapshot().publicPrice().total(), "transfer-promo");
         assertThat(count("payments")).isEqualTo(1);
@@ -246,11 +247,11 @@ class WorkflowTest {
         String home = jdbc.sql("SELECT payload FROM outbox WHERE method = 'sendMessage' ORDER BY id DESC LIMIT 1")
                 .query(String.class).single();
         JsonNode keyboard = json.read(home, JsonNode.class).path("reply_markup");
-        assertThat(keyboard.path("is_persistent").asBoolean()).isTrue();
-        assertThat(keyboard.path("keyboard").size()).isEqualTo(2);
-        assertThat(home).contains("Новый заказ", "Мои заказы", "Помощь");
+        assertThat(keyboard.path("remove_keyboard").asBoolean()).isTrue();
+        assertThat(keyboard.has("keyboard")).isFalse();
+        assertThat(home).contains("меню слева");
         assertThat(keyboard.toString()).doesNotContain(BotText.get("button.print"), BotText.get("button.model"));
-        assertThat(json.read(home, JsonNode.class).path("text").asText()).isEqualTo("""
+        assertThat(json.read(home, JsonNode.class).path("text").asText()).startsWith("""
                 Привет!
                 Мы команда PrintLab и занимаемся 3D-печатью.
 
@@ -321,10 +322,12 @@ class WorkflowTest {
         for (int field = 0; field < 4; field++) {
             groupClick(444, -12345, "cat:skip");
         }
+        group(444, -12345, Map.of("text", "900"));
+        group(444, -12345, Map.of("text", "1000"));
         var red = colors.page(false, 0).stream().filter(color -> color.name().equals("Красный")).findFirst().orElseThrow();
         assertThat(red.manufacturer()).isNull();
         for (String name : List.of("Зелёный", "Жёлтый", "Синий", "Серый")) {
-            colors.save(444, new ru.printlab.catalog.FilamentColor(null, name, null, null, null, null, true, false));
+            colors.save(444, new ru.printlab.catalog.FilamentColor(null, name, null, null, null, null, true, false, new BigDecimal("900"), 1000));
         }
         groupClick(444, -12345, "cat:toggle:" + red.id());
         assertThat(colors.get(red.id()).available()).isFalse();
@@ -333,7 +336,7 @@ class WorkflowTest {
         click(333, "colors:" + colorDraft.id() + ":0");
         JsonNode page = json.read(jdbc.sql("SELECT payload FROM outbox WHERE method = 'sendMessage' ORDER BY id DESC LIMIT 1")
                 .query(String.class).single(), JsonNode.class);
-        assertThat(page.path("reply_markup").path("inline_keyboard").size()).isEqualTo(7);
+        assertThat(page.path("reply_markup").path("inline_keyboard").size()).isEqualTo(8);
         assertThat(page.toString()).contains("Следующая").doesNotContain("Красный");
         click(333, "colors:" + colorDraft.id() + ":1");
         assertThat(jdbc.sql("SELECT payload FROM outbox WHERE method = 'sendMessage' ORDER BY id DESC LIMIT 1").query(String.class).single()).contains("Предыдущая");
@@ -355,7 +358,6 @@ class WorkflowTest {
         Quote old = service.estimate(111, order.number(), Fixtures.estimate());
         Quote current = service.estimate(111, order.number(), Fixtures.estimate());
         assertThatThrownBy(() -> service.accept(222, old.id())).isInstanceOf(BusinessException.class);
-        service.approve(111, order.number(), "Рекламный бюджет");
         service.accept(222, finalQuote(222, current.id()));
         clock.set(current.expiresAt());
         assertThatThrownBy(() -> service.paid(111, order.number(), current.snapshot().publicPrice().total(), "late-transfer"))
@@ -386,74 +388,59 @@ class WorkflowTest {
     }
 
     @Test
-    void twoReservedOffersPreventThirdDiscountAndCancellationReleasesSlot() {
-        PrintOrder first = null;
-        for (int index = 0; index < 2; index++) {
-            PrintOrder order = submitted(1000 + index, "FIRST50");
-            service.estimate(111, order.number(), Fixtures.estimate());
-            if (first == null) {
-                first = order;
-            }
-        }
-        PrintOrder extra = submitted(2000, "FIRST50");
-        Quote blocked = service.estimate(111, extra.number(), Fixtures.estimate());
-        assertThat(blocked.snapshot().publicPrice().discount()).isZero();
-        service.cancel(1000, first.id());
-        Quote released = service.estimate(111, extra.number(), Fixtures.estimate());
-        assertThat(released.snapshot().publicPrice().discount()).isEqualByComparingTo("275.00");
-
+    void unpaidOffersDoNotConsumeQuotaAndTwoPaymentsOpenFirst30() {
+        PrintOrder cancelled = submitted(1000, "FIRST50");
+        service.estimate(111, cancelled.number(), Fixtures.estimate());
+        service.cancel(1000, cancelled.id());
         PrintOrder waiting = submitted(3000, "FIRST30");
-        Quote tooEarly = service.estimate(111, waiting.number(), Fixtures.estimate());
-        assertThat(tooEarly.snapshot().publicPrice().discount()).isZero();
-        PrintOrder second = orders.list(1001, false).getFirst();
-        int payments = 0;
-        for (PrintOrder paid : List.of(second, extra)) {
-            PrintOrder current = orders.get(paid.id());
-            Quote quote = orders.quote(current.quoteId());
-            service.approve(111, current.number(), "Проверка двух этапов акции");
-            long customer = orders.telegramId(current.customerId());
-            service.accept(customer, finalQuote(customer, quote.id()));
-            service.paid(111, current.number(), quote.snapshot().publicPrice().total(), "promo-" + current.number());
-            payments++;
-            if (payments == 1) {
-                assertThat(service.estimate(111, waiting.number(), Fixtures.estimate()).snapshot().publicPrice().discount()).isZero();
-            }
+        assertThat(service.estimate(111, waiting.number(), Fixtures.estimate()).snapshot().publicPrice().discount()).isZero();
+        for (long user : List.of(1001L, 2000L)) {
+            PrintOrder order = submitted(user, "FIRST50");
+            Quote quote = service.estimate(111, order.number(), Fixtures.estimate());
+            assertThat(quote.snapshot().publicPrice().discount()).isEqualByComparingTo("275.00");
+            service.accept(user, finalQuote(user, quote.id()));
+            service.paid(111, order.number(), quote.snapshot().publicPrice().total(), "promo-" + order.number());
         }
         assertThat(reservations.paidSlots("FIRST50")).isEqualTo(2);
-        Quote available = service.estimate(111, waiting.number(), Fixtures.estimate());
-        assertThat(available.snapshot().publicPrice().discount()).isEqualByComparingTo("165.00");
-        assertThat(available.snapshot().promotion().code()).isEqualTo("FIRST30");
+        PrintOrder blocked = submitted(2001, "FIRST50");
+        assertThat(service.estimate(111, blocked.number(), Fixtures.estimate()).snapshot().publicPrice().discount()).isZero();
+        assertThat(service.estimate(111, waiting.number(), Fixtures.estimate()).snapshot().publicPrice().discount()).isEqualByComparingTo("165.00");
         PrintOrder usedBoth = submitted(1001, "FIRST30");
         assertThat(service.estimate(111, usedBoth.number(), Fixtures.estimate()).snapshot().publicPrice().discount()).isZero();
-        for (int index = 0; index < 7; index++) {
-            PrintOrder order = submitted(4000 + index, "FIRST30");
-            assertThat(service.estimate(111, order.number(), Fixtures.estimate()).snapshot().publicPrice().discount())
-                    .isEqualByComparingTo("165.00");
-        }
-        PrintOrder ninth = submitted(5000, "FIRST30");
-        assertThat(service.estimate(111, ninth.number(), Fixtures.estimate()).snapshot().publicPrice().discount()).isZero();
-        service.cancel(3000, waiting.id());
-        assertThat(service.estimate(111, ninth.number(), Fixtures.estimate()).snapshot().publicPrice().discount())
-                .isEqualByComparingTo("165.00");
     }
 
     @Test
-    void concurrentLastPromotionSlotCannotBeReservedTwice() throws Exception {
-        for (int index = 0; index < 1; index++) {
-            PrintOrder order = submitted(1000 + index, "FIRST50");
-            service.estimate(111, order.number(), Fixtures.estimate());
-        }
+    void concurrentLastPromotionSlotCanOnlyBePaidOnce() throws Exception {
+        PrintOrder paid = submitted(1000, "FIRST50");
+        Quote initial = service.estimate(111, paid.number(), Fixtures.estimate());
+        service.accept(1000, finalQuote(1000, initial.id()));
+        service.paid(111, paid.number(), initial.snapshot().publicPrice().total(), "paid-first");
         PrintOrder left = submitted(2001, "FIRST50");
         PrintOrder right = submitted(2002, "FIRST50");
+        for (PrintOrder order : List.of(left, right)) {
+            Quote quote = service.estimate(111, order.number(), Fixtures.estimate());
+            long user = orders.telegramId(order.customerId());
+            service.accept(user, finalQuote(user, quote.id()));
+        }
         CountDownLatch start = new CountDownLatch(1);
         try (var executor = Executors.newFixedThreadPool(2)) {
-            Future<Quote> first = executor.submit(() -> { start.await(); return service.estimate(111, left.number(), Fixtures.estimate()); });
-            Future<Quote> second = executor.submit(() -> { start.await(); return service.estimate(111, right.number(), Fixtures.estimate()); });
+            Future<Boolean> first = executor.submit(() -> { start.await(); return tryPayment(left); });
+            Future<Boolean> second = executor.submit(() -> { start.await(); return tryPayment(right); });
             start.countDown();
-            BigDecimal discounts = first.get().snapshot().publicPrice().discount().add(second.get().snapshot().publicPrice().discount());
-            assertThat(discounts).isEqualByComparingTo("275.00");
+            assertThat(List.of(first.get(), second.get())).containsExactlyInAnyOrder(true, false);
         }
-        assertThat(count("promotion_reservations")).isEqualTo(2);
+        assertThat(count("payments")).isEqualTo(2);
+        assertThat(reservations.paidSlots("FIRST50")).isEqualTo(2);
+    }
+
+    private boolean tryPayment(PrintOrder order) {
+        try {
+            Quote quote = orders.quote(orders.get(order.id()).quoteId());
+            service.paid(111, order.number(), quote.snapshot().publicPrice().total(), "race-" + order.number());
+            return true;
+        } catch (BusinessException expected) {
+            return false;
+        }
     }
 
     @Test
@@ -474,7 +461,7 @@ class WorkflowTest {
         SliceJob job = slicing.claim();
         SliceResult result = new SliceResult(Fixtures.estimate(), "test-engine, measured fixture, not real slicer");
         slicing.complete(job, result);
-        assertThat(orders.get(order.id()).status()).isEqualTo(OrderStatus.QUOTE_READY);
+        assertThat(orders.get(order.id()).status()).isEqualTo(OrderStatus.REVIEW_REQUIRED);
         assertThat(count("quotes")).isEqualTo(1);
         PrintOrder retry = submitted(444, "");
         jobs.enqueue(retry.id(), clock.instant());
@@ -510,23 +497,30 @@ class WorkflowTest {
     }
 
     @Test
-    void uncappedCampaignReservesTheActualDiscount() {
+    void uncappedCampaignCountsTheActualDiscountOnlyAfterPayment() {
         PrintOrder order = submitted(222, "FIRST50");
         Estimate large = new Estimate(new BigDecimal("1000"), BigDecimal.ZERO, new BigDecimal("600"),
                 BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
         Quote quote = service.estimate(111, order.number(), large);
         assertThat(quote.snapshot().publicPrice().discount()).isGreaterThan(new BigDecimal("600"));
+        assertThat(count("promotion_reservations")).isZero();
+        service.accept(222, finalQuote(222, quote.id()));
+        service.paid(111, order.number(), quote.snapshot().publicPrice().total(), "uncapped");
         assertThat(jdbc.sql("SELECT discount FROM promotion_reservations").query(BigDecimal.class).single())
                 .isEqualByComparingTo(quote.snapshot().publicPrice().discount());
     }
 
     @Test
-    void oneCustomerCannotReserveFirstPromotionInTwoOrders() {
+    void oneCustomerCanQuoteTwoOrdersButCanOnlyPayOneWithFirstPromotion() {
         PrintOrder first = submitted(222, "FIRST50");
-        service.estimate(111, first.number(), Fixtures.estimate());
+        Quote firstQuote = service.estimate(111, first.number(), Fixtures.estimate());
         PrintOrder second = submitted(222, "FIRST50");
         Quote quote = service.estimate(111, second.number(), Fixtures.estimate());
-        assertThat(quote.snapshot().publicPrice().discount()).isZero();
+        assertThat(quote.snapshot().publicPrice().discount()).isPositive();
+        assertThat(count("promotion_reservations")).isZero();
+        service.accept(222, finalQuote(222, firstQuote.id()));
+        service.paid(111, first.number(), firstQuote.snapshot().publicPrice().total(), "first-only");
+        assertThat(service.estimate(111, second.number(), Fixtures.estimate()).snapshot().publicPrice().discount()).isZero();
         assertThat(count("promotion_reservations")).isEqualTo(1);
     }
 
@@ -565,6 +559,8 @@ class WorkflowTest {
                     .param(customer).update();
             jdbc.sql("INSERT INTO " + schema + ".orders(id, customer_id, status, print_profile, infill, quantity, promo_code, created_at) VALUES (?, ?, 'DRAFT', 'FINE', 60, 5, 'FIRST50', CURRENT_TIMESTAMP)")
                     .param(order).param(customer).update();
+            jdbc.sql("INSERT INTO " + schema + ".promotion_reservations(order_id, customer_id, code, discount, expires_at, redeemed) VALUES (?, ?, 'FIRST50', 100, CURRENT_TIMESTAMP, TRUE)")
+                    .param(order).param(customer).update();
             org.flywaydb.core.Flyway.configure().dataSource(dataSource).schemas(schema).defaultSchema(schema)
                     .load().migrate();
             Map<String, Object> saved = jdbc.sql("SELECT infill, quantity, promo_code, layer_height_mm FROM " + schema + ".orders WHERE id = ?")
@@ -573,6 +569,10 @@ class WorkflowTest {
             assertThat(((Number) saved.get("quantity")).intValue()).isEqualTo(5);
             assertThat(saved.get("promo_code")).isEqualTo("FIRST50");
             assertThat((BigDecimal) saved.get("layer_height_mm")).isEqualByComparingTo("0.12");
+            assertThat(jdbc.sql("SELECT redeemed FROM " + schema + ".promotion_reservations WHERE order_id = ?")
+                    .param(order).query(Boolean.class).single()).isTrue();
+            assertThat(jdbc.sql("SELECT used_orders FROM " + schema + ".promo_codes WHERE code = 'FIRST50'")
+                    .query(Integer.class).single()).isEqualTo(1);
             jdbc.sql("UPDATE " + schema + ".orders SET infill = 1 WHERE id = ?").param(order).update();
             jdbc.sql("UPDATE " + schema + ".orders SET infill = 100 WHERE id = ?").param(order).update();
             assertThatThrownBy(() -> jdbc.sql("UPDATE " + schema + ".orders SET infill = 101 WHERE id = ?").param(order).update())

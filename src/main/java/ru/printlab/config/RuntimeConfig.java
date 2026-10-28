@@ -12,6 +12,10 @@ import java.time.Clock;
 public class RuntimeConfig {
     public RuntimeConfig(AppProperties properties, OperatorProperties operators) {
         CostRates rates = properties.rates();
+        if (rates.materialSaleMultiplier() != null && (rates.materialSaleMultiplier().signum() <= 0
+                || rates.materialSaleMultiplier().compareTo(new BigDecimal("1000")) > 0)) {
+            throw new IllegalStateException("Множитель цены пластика должен быть больше 0 и не больше 1000.");
+        }
         Money.nonNegative(rates.electricityPerKwh(), "Электроэнергия");
         Money.nonNegative(rates.printerKw(), "Мощность");
         Money.nonNegative(rates.depreciationPerHour(), "Амортизация");

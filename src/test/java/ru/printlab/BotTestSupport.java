@@ -44,9 +44,12 @@ abstract class BotTestSupport {
 
     @BeforeEach
     void reset() {
-        for (String table : List.of("customer_intake", "order_messages", "bot_dialogs", "modeling_receipts", "delivery_details", "outbox",
+        for (String table : List.of("color_requests", "customer_intake", "order_messages", "bot_dialogs", "modeling_receipts", "delivery_details", "outbox",
                 "order_actuals", "order_events", "payments", "promotion_reservations", "slicing_jobs", "quotes", "modeling_photos", "orders", "model_files", "customers"))
             jdbc.sql("DELETE FROM " + table).update();
+        jdbc.sql("DELETE FROM filament_colors WHERE id NOT IN ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003')").update();
+        jdbc.sql("UPDATE filament_colors SET available = TRUE, deleted = FALSE, spool_weight_grams = 1000, spool_price = 700 WHERE id IN ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002')").update();
+        jdbc.sql("UPDATE filament_colors SET available = TRUE, deleted = FALSE, spool_weight_grams = 1000, spool_price = 1100 WHERE id = '00000000-0000-4000-8000-000000000003'").update();
         new ResourceDatabasePopulator(new ClassPathResource("test-promotions.sql")).execute(dataSource);
         jdbc.sql("UPDATE bot_cursor SET next_update = 0").update();
         jdbc.sql("DELETE FROM operator_accounts").update();
@@ -83,7 +86,6 @@ abstract class BotTestSupport {
     void pay(long user,PrintOrder draft) {
         service.submit(user,draft.id());
         Quote quote=service.estimate(111,draft.number(),Fixtures.estimate());
-        if(orders.get(draft.id()).status()==OrderStatus.REVIEW_REQUIRED)service.approve(111,draft.number(),"Тестовое согласование");
         service.delivery(user,draft.id(),"PICKUP","Тестовый Получатель","+70000000000","Тестовый ПВЗ СДЭК");
         quote=service.priceDelivery(111,draft.id(),quote.id(),BigDecimal.ZERO);
         if(orders.get(draft.id()).status()==OrderStatus.REVIEW_REQUIRED)service.approve(111,draft.number(),"Тестовое согласование доставки");

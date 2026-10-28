@@ -59,12 +59,9 @@ public class DemoRunner implements ApplicationRunner {
         Estimate example = new Estimate(new BigDecimal("75"), BigDecimal.ZERO, new BigDecimal("210"),
                 BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
         Quote quote = service.estimate(111, order.number(), example);
-        if (quote.snapshot().economics().needsReview()) {
-            service.approve(111, order.number(), "Демонстрация финансового согласования, не реальный заказ");
-        }
         service.delivery(222, order.id(), "PICKUP", "Тестовый Получатель", "+79991234567", "Демонстрационный ПВЗ СДЭК");
         quote = service.priceDelivery(111, order.id(), quote.id(), BigDecimal.ZERO);
-        if (quote.snapshot().economics().needsReview()) {
+        if (orders.get(order.id()).status() == OrderStatus.REVIEW_REQUIRED) {
             service.approve(111, order.number(), "Демонстрация доставки, не реальный заказ");
         }
         service.accept(222, quote.id());

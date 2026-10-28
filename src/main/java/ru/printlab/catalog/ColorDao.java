@@ -19,7 +19,7 @@ public class ColorDao {
     public List<FilamentColor> page(boolean customer, int page) {
         String filter = "deleted = FALSE";
         if (customer) {
-            filter += " AND available = TRUE";
+            filter += " AND available = TRUE AND spool_price IS NOT NULL";
         }
         return jdbc.sql("SELECT * FROM filament_colors WHERE " + filter + " ORDER BY name, id LIMIT 6 OFFSET ?")
                 .param(page * 5)
@@ -36,7 +36,7 @@ public class ColorDao {
     }
 
     public void save(FilamentColor color) {
-        int changed = jdbc.sql("UPDATE filament_colors SET name = ?, surface = ?, manufacturer = ?, palette_number = ?, bambu_article = ?, available = ?, deleted = ? WHERE id = ?")
+        int changed = jdbc.sql("UPDATE filament_colors SET name = ?, surface = ?, manufacturer = ?, palette_number = ?, bambu_article = ?, available = ?, deleted = ?, spool_price = ?, spool_weight_grams = ? WHERE id = ?")
                 .param(color.name())
                 .param(color.surface())
                 .param(color.manufacturer())
@@ -44,10 +44,12 @@ public class ColorDao {
                 .param(color.bambuArticle())
                 .param(color.available())
                 .param(color.deleted())
+                .param(color.spoolPrice())
+                .param(color.spoolWeightGrams())
                 .param(color.id())
                 .update();
         if (changed == 0) {
-            jdbc.sql("INSERT INTO filament_colors(id, name, surface, manufacturer, palette_number, bambu_article, available, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+            jdbc.sql("INSERT INTO filament_colors(id, name, surface, manufacturer, palette_number, bambu_article, available, deleted, spool_price, spool_weight_grams) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                     .param(color.id())
                     .param(color.name())
                     .param(color.surface())
@@ -56,6 +58,8 @@ public class ColorDao {
                     .param(color.bambuArticle())
                     .param(color.available())
                     .param(color.deleted())
+                    .param(color.spoolPrice())
+                    .param(color.spoolWeightGrams())
                     .update();
         }
     }
@@ -63,6 +67,6 @@ public class ColorDao {
     private FilamentColor map(ResultSet rs, int row) throws SQLException {
         return new FilamentColor(rs.getObject("id", UUID.class), rs.getString("name"), rs.getString("surface"),
                 rs.getString("manufacturer"), rs.getString("palette_number"), rs.getString("bambu_article"),
-                rs.getBoolean("available"), rs.getBoolean("deleted"));
+                rs.getBoolean("available"), rs.getBoolean("deleted"), rs.getBigDecimal("spool_price"), rs.getInt("spool_weight_grams"));
     }
 }
