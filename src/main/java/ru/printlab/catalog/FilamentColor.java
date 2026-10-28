@@ -3,7 +3,12 @@ package ru.printlab.catalog;
 import java.util.UUID;
 
 public record FilamentColor(UUID id, String name, String surface, String manufacturer,
-                            String paletteNumber, String bambuArticle, boolean available, boolean deleted, java.math.BigDecimal spoolPrice, int spoolWeightGrams) {
+                            String paletteNumber, String bambuArticle, boolean available, boolean deleted, java.math.BigDecimal spoolPrice, Integer spoolWeightGrams) {
+    public FilamentColor {
+        // Saved quotes before 1.3 have no spool mass. Their material cost remains in the frozen snapshot.
+        if (spoolWeightGrams == null) spoolWeightGrams = 1000;
+    }
+
     public FilamentColor(UUID id, String name, String surface, String manufacturer, String paletteNumber,
                          String bambuArticle, boolean available, boolean deleted) {
         this(id, name, surface, manufacturer, paletteNumber, bambuArticle, available, deleted, null, 1000);

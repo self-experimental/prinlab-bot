@@ -200,6 +200,29 @@ class ApprovalPricingWorkflowTest extends BotTestSupport {
                 .anyMatch(p -> p.contains("remove_keyboard") && !p.contains("is_persistent"));
     }
 
+    @Test
+    void historicalQuotesWithMissingOrNullSpoolFieldsRemainReadableWithoutRepricing() {
+        PrintOrder order = draft(222);
+        Quote current = estimate(222, order, Fixtures.estimate());
+        String legacy = json.write(current.snapshot())
+                .replace(",\"spoolPrice\":" + json.write(current.snapshot().color().spoolPrice()), "")
+                .replace(",\"spoolWeightGrams\":1000", "")
+                .replace(",\"materialSaleMultiplier\":" + json.write(current.snapshot().rates().materialSaleMultiplier()), "");
+        for (boolean explicitNull : List.of(false, true)) {
+            String payload = legacy;
+            if (explicitNull) payload = legacy.replace("\"color\":{", "\"color\":{\"spoolWeightGrams\":null,");
+            jdbc.sql("UPDATE quotes SET snapshot = ? WHERE id = ?").param(payload).param(current.id()).update();
+            Quote restored = orders.quote(current.id());
+            assertThat(restored.snapshot().color().spoolWeightGrams()).isEqualTo(1000);
+            assertThat(restored.snapshot().color().spoolPrice()).isNull();
+            assertThat(restored.snapshot().rates().materialSaleMultiplier()).isNull();
+            assertThat(restored.snapshot().material()).isEqualTo(current.snapshot().material());
+            assertThat(restored.snapshot().costs()).isEqualTo(current.snapshot().costs());
+            assertThat(restored.snapshot().publicPrice()).isEqualTo(current.snapshot().publicPrice());
+            assertThat(service.summary(orders.get(order.id()))).contains("Чёрный");
+        }
+    }
+
     private Quote estimate(long user, PrintOrder order, Estimate estimate) {
         service.submit(user, order.id());
         return service.estimate(111, order.number(), estimate);
