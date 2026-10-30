@@ -62,6 +62,7 @@ class InteractiveWorkflowTest extends BotTestSupport {
         assertThat(intake.get(222).mode()).isEqualTo("STL");
         assertThat(messages(222)).contains("Выбрана печать по STL");
         send(222,BotText.get("button.model"));
+        click(222,"newConfirm:"+stl.id());click(222,"nav:model");
         PrintOrder photo=orders.list(222,false).getFirst();
         message(222,222,document("wrong.STL","stl-file"));
         assertThat(orders.get(photo.id()).status()).isEqualTo(OrderStatus.MODELING);

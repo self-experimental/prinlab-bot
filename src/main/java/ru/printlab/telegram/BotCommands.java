@@ -79,12 +79,12 @@ public class BotCommands {
                     case "/model" -> flow.model(user);
                     case "/id" -> messages.text(user, "Telegram ID: " + user);
                     case "/new" -> flow.newOrder(user);
-                    case "/draft" -> flow.draft(user, service.newDraft(user));
+                    case "/draft" -> flow.print(user);
                     case "/orders" -> flow.list(user);
                     case "/order" -> flow.show(user, orders.byNumber(number(args, 1)).id());
                     case "/cancel" -> service.cancel(user, orders.byNumber(number(args, 1)).id());
-                    case "/quantity" -> flow.draft(user, service.configure(user, service.newDraft(user).id(), "quantity", argument(args, 1)));
-                    case "/promo" -> flow.draft(user, service.configure(user, service.newDraft(user).id(), "promo", argument(args, 1)));
+                    case "/quantity" -> flow.draft(user, service.configure(user, existingDraft(user).id(), "quantity", argument(args, 1)));
+                    case "/promo" -> flow.draft(user, service.configure(user, existingDraft(user).id(), "promo", argument(args, 1)));
                     default -> flow.home(user);
                 }
                 return;
@@ -146,6 +146,21 @@ public class BotCommands {
         } catch (IllegalArgumentException exception) {
             throw new BusinessException("Проверь формат числа или открой заказ заново через админ-меню.");
         }
+    }
+
+    private PrintOrder existingDraft(long user) {
+        IntakeDao.Intake selected = intake.get(user);
+        if (selected != null && !selected.mode().equals("STL")) {
+            throw new BusinessException("Сейчас открыт заказ по фото. Открой нужный STL-заказ через «Мои заказы».");
+        }
+        if (selected != null && selected.mode().equals("STL")) {
+            PrintOrder order = service.owned(user, selected.orderId());
+            order.status().require(OrderStatus.DRAFT);
+            return order;
+        }
+        PrintOrder draft = orders.draft(user);
+        if (draft == null) throw new BusinessException("Сначала открой STL-заказ через «Мои заказы» или создай новый заказ в меню.");
+        return draft;
     }
 
     private void customerMedia(long user, JsonNode message) {

@@ -21,6 +21,10 @@ public class TelegramMenu {
     @EventListener(ApplicationReadyEvent.class)
     @Transactional
     public void configure() {
+        for (String language : List.of("", "ru")) {
+            outbox.add("setMyShortDescription", Map.of("short_description", BotText.get("profile.short"), "language_code", language), clock.instant());
+            outbox.add("setMyDescription", Map.of("description", BotText.get("profile.description"), "language_code", language), clock.instant());
+        }
         outbox.add("setMyCommands", Map.of("commands", List.of(
                 Map.of("command", "new", "description", "Новый заказ"),
                 Map.of("command", "orders", "description", "Мои заказы"),

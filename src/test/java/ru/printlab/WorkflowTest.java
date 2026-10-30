@@ -76,6 +76,9 @@ class WorkflowTest {
         send(222, "/start card01");
         click(222, "agree");
         send(222, BotText.get("button.model"));
+        assertThat(dialogs.get(222,222).kind()).isEqualTo("NEW_CONFIRM");
+        click(222,"newConfirm:"+dialogs.get(222,222).orderId());
+        click(222,"nav:model");
         JsonNode photo = update(222, Map.of("photo", List.of(
                 Map.of("file_id", "small-photo", "width", 100, "height", 100),
                 Map.of("file_id", "large-photo", "width", 1000, "height", 1000)), "caption", "Корпус 30×40 мм"));
@@ -253,9 +256,8 @@ class WorkflowTest {
         assertThat(keyboard.toString()).doesNotContain(BotText.get("button.print"), BotText.get("button.model"));
         assertThat(json.read(home, JsonNode.class).path("text").asText()).startsWith("""
                 Привет!
-                Мы команда PrintLab и занимаемся 3D-печатью.
 
-                Для печати нужен STL. Это файл с объёмной моделью будущей детали.
+                Мы команда PrintLab и занимаемся 3D-печатью.
 
                 Модель уже есть? Присылай STL, рассчитаем стоимость печати.
 
@@ -279,10 +281,13 @@ class WorkflowTest {
         assertThat(orders.list(222, false).getFirst().status()).isEqualTo(OrderStatus.DRAFT);
         assertThat(customerMessages(222)).contains("Выбрана печать по STL");
         send(222, BotText.get("button.model"));
+        assertThat(dialogs.get(222,222).kind()).isEqualTo("NEW_CONFIRM");
+        click(222,"newConfirm:"+dialogs.get(222,222).orderId());
+        click(222,"nav:model");
         processor.process(update(222, Map.of("document", Map.of("file_id", "reference-png", "file_name", "reference.PNG", "file_size", 100))));
         PrintOrder request = orders.list(222, false).getFirst();
         assertThat(request.status()).isEqualTo(OrderStatus.MODELING);
-        assertThat(orders.draft(222).quantity()).isEqualTo(3);
+        assertThat(orders.draft(222)).isNull();
         send(222, "/cancel " + request.number());
         assertThat(orders.get(request.id()).status()).isEqualTo(OrderStatus.CANCELLED);
     }
@@ -347,6 +352,7 @@ class WorkflowTest {
         groupClick(444, -999, "op:reply:" + order.id());
         assertThat(dialogs.get(444, -999)).isNull();
         send(333, BotText.get("button.model"));
+        click(333,"newConfirm:"+colorDraft.id());click(333,"nav:model");
         processor.process(update(333, Map.of("photo", List.of(Map.of("file_id", "group-photo", "width", 100, "height", 100)))));
         String payload = jdbc.sql("SELECT payload FROM outbox WHERE method = 'sendPhoto'").query(String.class).single();
         assertThat(json.read(payload, JsonNode.class).path("chat_id").asLong()).isEqualTo(-12345);

@@ -1,0 +1,126 @@
+﻿class,scenario,result_PostgreSQL
+ru.printlab.A1MiniPricingTest,severalPlatesDoNotIntroduceALaunchChargeOrMultiplyTotalSlicerConsumption,PASS
+ru.printlab.A1MiniPricingTest,ownerRatesProduceIndependentlyCalculatedCostsAndAmortization,PASS
+ru.printlab.A1MiniPricingTest,legacySnapshotsRetainOldAmortizationAndNoNewLaunchFee,PASS
+ru.printlab.A1MiniPricingTest,promotionDiscountsAllPrintingAndFeesAndTaxIncludeEntirePayment,PASS
+ru.printlab.AdversarialWorkflowTest,textAndPhotoCaptionLimitsKeepTheReplyStepOnFailure,PASS
+ru.printlab.AdversarialWorkflowTest,catalogShowsFiveButtonsAndTheSixthColorOnTheNextPage,PASS
+ru.printlab.AdversarialWorkflowTest,crossUserCallbacksAndForgedOperatorActionsCannotMutateAnOrder,PASS
+ru.printlab.AdversarialWorkflowTest,repeatedSubmitDoesNotCreateAnotherOrderOrQuote,PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[1]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[2]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[3]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[4]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[5]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[6]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[7]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[8]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[9]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[10]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[11]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[12]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[13]",PASS
+ru.printlab.AdversarialWorkflowTest,"integerBounds(String, String, boolean)[14]",PASS
+ru.printlab.AdversarialWorkflowTest,selfPickupStillOffersAndSendsCdekShippingNotification,PASS
+ru.printlab.AdversarialWorkflowTest,first30RepeatedApplyAndDuplicatePaidReferencesDoNotExpandQuota,PASS
+ru.printlab.AdversarialWorkflowTest,oldParameterDialogSurvivesNavigationToAnotherStep,PASS
+ru.printlab.AdversarialWorkflowTest,"spoolBounds(String, int, boolean)[1]",PASS
+ru.printlab.AdversarialWorkflowTest,"spoolBounds(String, int, boolean)[2]",PASS
+ru.printlab.AdversarialWorkflowTest,"spoolBounds(String, int, boolean)[3]",PASS
+ru.printlab.AdversarialWorkflowTest,"spoolBounds(String, int, boolean)[4]",PASS
+ru.printlab.AdversarialWorkflowTest,"spoolBounds(String, int, boolean)[5]",PASS
+ru.printlab.AdversarialWorkflowTest,"spoolBounds(String, int, boolean)[6]",PASS
+ru.printlab.AdversarialWorkflowTest,"spoolBounds(String, int, boolean)[7]",PASS
+ru.printlab.AdversarialWorkflowTest,"spoolBounds(String, int, boolean)[8]",PASS
+ru.printlab.AdversarialWorkflowTest,"editedPriceBounds(String, boolean)[1]",PASS
+ru.printlab.AdversarialWorkflowTest,"editedPriceBounds(String, boolean)[2]",PASS
+ru.printlab.AdversarialWorkflowTest,"editedPriceBounds(String, boolean)[3]",PASS
+ru.printlab.AdversarialWorkflowTest,"editedPriceBounds(String, boolean)[4]",PASS
+ru.printlab.AdversarialWorkflowTest,"editedPriceBounds(String, boolean)[5]",PASS
+ru.printlab.AdversarialWorkflowTest,"editedPriceBounds(String, boolean)[6]",PASS
+ru.printlab.AdversarialWorkflowTest,"editedPriceBounds(String, boolean)[7]",PASS
+ru.printlab.AdversarialWorkflowTest,"editedPriceBounds(String, boolean)[8]",PASS
+ru.printlab.AdversarialWorkflowTest,hiddenPaidOrderCanStillBeMovedByAdminCommand,PASS
+ru.printlab.AdversarialWorkflowTest,customerExplicitReplyToFirstOrderIsRecordedAgainstActiveSecondOrder,PASS
+ru.printlab.AdversarialWorkflowTest,invalidPromoCommandCreatesAnEmptyDraft,PASS
+ru.printlab.AdversarialWorkflowTest,"carrierBounds(String, boolean)[1]",PASS
+ru.printlab.AdversarialWorkflowTest,"carrierBounds(String, boolean)[2]",PASS
+ru.printlab.AdversarialWorkflowTest,"carrierBounds(String, boolean)[3]",PASS
+ru.printlab.AdversarialWorkflowTest,"carrierBounds(String, boolean)[4]",PASS
+ru.printlab.AdversarialWorkflowTest,"carrierBounds(String, boolean)[5]",PASS
+ru.printlab.AdversarialWorkflowTest,"carrierBounds(String, boolean)[6]",PASS
+ru.printlab.AdversarialWorkflowTest,explicitReplyToFirstClientIsSentToSecondClientWhenAnotherReplyDialogIsActive,PASS
+ru.printlab.AdversarialWorkflowTest,deliveryMenuDoesNotCancelExistingNameInput,PASS
+ru.printlab.AdversarialWorkflowTest,paymentDialogFullHumanSequenceRejectsBadReferencesAndDuplicateActions,PASS
+ru.printlab.AdversarialWorkflowTest,customColorInputBoundaryAndStaleButtons,PASS
+ru.printlab.AdversarialWorkflowTest,repeatedPromoApplyDoesNotConsumeQuotaOrDuplicateDiscount,PASS
+ru.printlab.AdversarialWorkflowTest,extensionAndSizeChecksDoNotDownloadOrSwitchToPhotoMode,PASS
+ru.printlab.AdversarialWorkflowTest,oldModelConsentBypassesNewOrderConfirmation,PASS
+ru.printlab.AdversarialWorkflowTest,lowInfillConfirmationCannotBeReusedAfterLeavingTheStep,PASS
+ru.printlab.AdversarialWorkflowTest,backFromPaymentCancelsReferenceInputAndStaleConfirmationCannotCharge,PASS
+ru.printlab.AdversarialWorkflowTest,byteLimitsAndStructuralChecks,PASS
+ru.printlab.AdversarialWorkflowTest,"layerBounds(String, boolean)[1]",PASS
+ru.printlab.AdversarialWorkflowTest,"layerBounds(String, boolean)[2]",PASS
+ru.printlab.AdversarialWorkflowTest,"layerBounds(String, boolean)[3]",PASS
+ru.printlab.AdversarialWorkflowTest,"layerBounds(String, boolean)[4]",PASS
+ru.printlab.AdversarialWorkflowTest,"layerBounds(String, boolean)[5]",PASS
+ru.printlab.AdversarialWorkflowTest,"layerBounds(String, boolean)[6]",PASS
+ru.printlab.AdversarialWorkflowTest,"layerBounds(String, boolean)[7]",PASS
+ru.printlab.AdversarialWorkflowTest,"layerBounds(String, boolean)[8]",PASS
+ru.printlab.AdversarialWorkflowTest,"layerBounds(String, boolean)[9]",PASS
+ru.printlab.AdversarialWorkflowTest,"layerBounds(String, boolean)[10]",PASS
+ru.printlab.ApprovalPricingWorkflowTest,retailUsesSpoolPriceAndNetMassWhileKeepingAllInternalCostsAndFrozenHistory,PASS
+ru.printlab.ApprovalPricingWorkflowTest,customColorRejectionAndCatalogSelectionInvalidateOldOperatorButtons,PASS
+ru.printlab.ApprovalPricingWorkflowTest,customColorApprovalUsesItsRealSpoolCostAndIsRestrictedToThatOrder,PASS
+ru.printlab.ApprovalPricingWorkflowTest,allThreePickupPointsAreFreeAndChangingFulfillmentWithdrawsPublishedOffer,PASS
+ru.printlab.ApprovalPricingWorkflowTest,leftMenuReplacesReplyKeyboardAndUnexpectedMediaNeverCreatesAnOrder,PASS
+ru.printlab.ApprovalPricingWorkflowTest,manualPriceIsHiddenUntilExplicitApprovalAndStalePublishedOffersCannotBeAccepted,PASS
+ru.printlab.ApprovalPricingWorkflowTest,historicalQuotesWithMissingOrNullSpoolFieldsRemainReadableWithoutRepricing,PASS
+ru.printlab.ApprovalPricingWorkflowTest,cdekIsAnExternalFeeAndNeverInOurReceiptOrActualCosts,PASS
+ru.printlab.FileAndSlicerTest,acceptsBinaryStlEvenWhenHeaderStartsWithSolid,PASS
+ru.printlab.FileAndSlicerTest,rejectsModelsAboveA1MiniDimensionsBeforeSavingAndAcceptsExactBoundary,PASS
+ru.printlab.FileAndSlicerTest,parsesNormalGcodeWithoutDoubleCountingTotalAndPerExtruderWeight,PASS
+ru.printlab.FileAndSlicerTest,rejectsForgedTriangleCountAndNonFiniteCoordinates,PASS
+ru.printlab.FileAndSlicerTest,newBambuHeaderSupportsOneObjectAndRefusesMultipleFilaments,PASS
+ru.printlab.FileAndSlicerTest,acceptsStructuredAsciiAndRejectsFakeWrapper,PASS
+ru.printlab.FileAndSlicerTest,parsesBambuTotalTimeIncludingPreparationAndRejectsMissingMass,PASS
+ru.printlab.FileAndSlicerTest,passesQuantityAndAbsolutePathsAsSeparateProcessArguments,PASS
+ru.printlab.InteractiveWorkflowTest,uploadModesAreStrictAndTheCustomerConversationAcceptsOnlyText,PASS
+ru.printlab.InteractiveWorkflowTest,aQuoteHidesPricesUntilOperatorApprovalAndCollectsDelivery,PASS
+ru.printlab.InteractiveWorkflowTest,startingANewOrderRequiresConfirmationAndOnlyDiscardsItsOwnCurrentDraft,PASS
+ru.printlab.InteractiveWorkflowTest,failedSlicingOffersATextConversationAndDoesNotShowAnOldQuote,PASS
+ru.printlab.InteractiveWorkflowTest,deletionRetainsPaidAccountingAndCanBeUndone,PASS
+ru.printlab.InteractiveWorkflowTest,operatorsCanSendPhotosButTheReadyModelWorkflowAcceptsOnlyStl,PASS
+ru.printlab.PricingTest,ratesCannotHaveZeroOrNegativePriceDivisor,PASS
+ru.printlab.PricingTest,largeOrderHasUncappedDiscountAndExplicitWasteIsCountedOnce,PASS
+ru.printlab.PricingTest,independentHandCalculationOfEveryCostLine,PASS
+ru.printlab.PricingTest,actualConsumptionDoesNotAddFailureReserveAgain,PASS
+ru.printlab.PricingTest,rejectsUnavailableMaterialAndInvalidEstimate,PASS
+ru.printlab.PricingTest,unconfirmedProductionRatesCannotCalculatePrice,PASS
+ru.printlab.PricingTest,shippingIsNotDiscountedAndFeesIncludeShipping,PASS
+ru.printlab.PricingTest,ordinaryPriceDoesNotChangeWhenPromotionIsRequestedAndLaborIsZero,PASS
+ru.printlab.PromotionWorkflowTest,firstOrderAndSubsequentOrdersUsePaidHistoryAndPerUserOrderLimits,PASS
+ru.printlab.PromotionWorkflowTest,adminWizardValidatesAndSupportsCreateEditArchiveRestoreAndAuthorization,PASS
+ru.printlab.PromotionWorkflowTest,explicitApplyChecksEligibilityWithoutReservingAndFailureCanBeSkipped,PASS
+ru.printlab.PromotionWorkflowTest,unpaidDraftsAndCancelledOrdersDoNotConsumeUserOrOrderQuota,PASS
+ru.printlab.PromotionWorkflowTest,allTypesCheckCreationStartAndExpiryBeforeCustomFailureMessages,PASS
+ru.printlab.PromotionWorkflowTest,welcomeCampaignOpensOnlyAfterTwoPaymentsAndCountsEightOtherUsers,PASS
+ru.printlab.SlicerCliTest,actualEngineHonorsFineProfileAndInfill,SKIPPED
+ru.printlab.SlicerCliTest,actualEngineAccountsForQuantityAndProducesPresetProvenance,SKIPPED
+ru.printlab.SlicerCliTest,smallA1MiniBedSplitsLargeBatchAndCountsEveryObject,SKIPPED
+ru.printlab.WorkflowTest,oldQuoteAndExpiredPaymentAreRejectedAndReservationIsReleased,PASS
+ru.printlab.WorkflowTest,upgradesExistingOrdersWithoutLosingStoredParameters,PASS
+ru.printlab.WorkflowTest,automaticSlicingCompletionCreatesQuoteAndCancellationIgnoresLateResults,PASS
+ru.printlab.WorkflowTest,operatorCannotBillMorePlatesThanItems,PASS
+ru.printlab.WorkflowTest,lowContributionRequiresExplicitAdminApprovalAndPaymentConsumesPromotionOnlyOnce,PASS
+ru.printlab.WorkflowTest,uncappedCampaignCountsTheActualDiscountOnlyAfterPayment,PASS
+ru.printlab.WorkflowTest,unpaidOffersDoNotConsumeQuotaAndTwoPaymentsOpenFirst30,PASS
+ru.printlab.WorkflowTest,fullCustomerBotFlowThroughPaymentProductionAndActualCosts,PASS
+ru.printlab.WorkflowTest,refusesWrongAmountAndReusedPaymentReferenceAndPrepaidPrinting,PASS
+ru.printlab.WorkflowTest,rejectsUnauthorizedAdminCallsAndOtherCustomersButtons,PASS
+ru.printlab.WorkflowTest,concurrentLastPromotionSlotCanOnlyBePaidOnce,PASS
+ru.printlab.WorkflowTest,duplicateUpdateDoesNotCreateAnotherDraftOrNotificationAndInvalidInputDoesNotBlockCursor,PASS
+ru.printlab.WorkflowTest,outboxRetriesTemporaryFailureWithoutLosingMessages,PASS
+ru.printlab.WorkflowTest,recalculationPreservesPreviousSnapshot,PASS
+ru.printlab.WorkflowTest,oneCustomerCanQuoteTwoOrdersButCanOnlyPayOneWithFirstPromotion,PASS
+ru.printlab.WorkflowTest,expiredCampaignDoesNotApplyDiscount,PASS

@@ -52,13 +52,8 @@ public class CustomerFlow {
     }
 
     public void newOrder(long user) {
-        List<PrintOrder> editable = orders.editable(user);
-        if (!editable.isEmpty()) {
-            PrintOrder current = editable.getFirst();
-            IntakeDao.Intake active = intake.get(user);
-            if (active != null) {
-                for (PrintOrder candidate : editable) if (candidate.id().equals(active.orderId())) current = candidate;
-            }
+        PrintOrder current = currentDraft(user);
+        if (current != null) {
             dialogs.save(user, user, "NEW_CONFIRM", null, current.id(), null);
             messages.buttons(user, "Ты уже создаёшь заказ. Уверен, что хочешь начать новый? Данные незавершённого черновика будут сброшены.", List.of(
                     button("Да, создать новый", "newConfirm:" + current.id()),
@@ -66,6 +61,19 @@ public class CustomerFlow {
             return;
         }
         newOrderMenu(user);
+    }
+
+    private PrintOrder currentDraft(long user) {
+        List<PrintOrder> editable = orders.editable(user);
+        if (!editable.isEmpty()) {
+            PrintOrder current = editable.getFirst();
+            IntakeDao.Intake active = intake.get(user);
+            if (active != null) {
+                for (PrintOrder candidate : editable) if (candidate.id().equals(active.orderId())) current = candidate;
+            }
+            return current;
+        }
+        return null;
     }
 
     private void newOrderMenu(long user) {
@@ -86,6 +94,12 @@ public class CustomerFlow {
     public void print(long user) {
         BotDialog selected = dialogs.get(user, user);
         boolean fresh = selected != null && selected.kind().equals("NEW_CHOICE");
+        PrintOrder current = currentDraft(user);
+        if (!fresh && current != null && (current.status() != OrderStatus.DRAFT
+                || selected != null && selected.kind().equals("NEW_CONFIRM"))) {
+            newOrder(user);
+            return;
+        }
         dialogs.clear(user, user);
         if (!consent(user, "print")) {
             return;
@@ -103,6 +117,12 @@ public class CustomerFlow {
     public void model(long user) {
         BotDialog selected = dialogs.get(user, user);
         boolean fresh = selected != null && selected.kind().equals("NEW_CHOICE");
+        PrintOrder current = currentDraft(user);
+        if (!fresh && current != null && (current.status() != OrderStatus.MODELING
+                || selected != null && selected.kind().equals("NEW_CONFIRM"))) {
+            newOrder(user);
+            return;
+        }
         dialogs.clear(user, user);
         if (!consent(user, "model")) {
             return;
@@ -193,6 +213,7 @@ public class CustomerFlow {
         service.owned(user, order.id()).status().require(OrderStatus.DRAFT);
         intake.select(user, order.id(), "STL");
         List<FilamentColor> available = colors.page(true, page);
+        dialogs.clear(user, user);
         List<Map<String, String>> buttons = new ArrayList<>();
         for (int index = 0; index < Math.min(5, available.size()); index++) {
             FilamentColor color = available.get(index);
@@ -274,6 +295,7 @@ public class CustomerFlow {
         if (parts[0].equals("pick")) {
             PrintOrder order = orders.byNumber(Long.parseLong(parts[1]));
             PrintOrder updated = service.configure(user, order.id(), "color", part(parts, 2));
+            dialogs.clear(user, user);
             intake.select(user, order.id(), "STL");
             FilamentColor color = colors.available(updated.colorId());
             messages.buttons(user, "Выбран цвет: " + color.label() + ".", List.of(
@@ -328,8 +350,16 @@ public class CustomerFlow {
                     default -> throw stale();
                 }
             }
-            case "profile" -> infill(user, service.configure(user, id, "profile", part(parts, 2)));
-            case "infill" -> quantity(user, service.configure(user, id, "infill", part(parts, 2)));
+            case "profile" -> {
+                PrintOrder updated = service.configure(user, id, "profile", part(parts, 2));
+                dialogs.clear(user, user);
+                infill(user, updated);
+            }
+            case "infill" -> {
+                PrintOrder updated = service.configure(user, id, "infill", part(parts, 2));
+                dialogs.clear(user, user);
+                quantity(user, updated);
+            }
             case "quantity", "promo" -> draft(user, service.configure(user, id, parts[0], part(parts, 2)));
             case "input" -> beginInput(user, order, part(parts, 2));
             case "lowkeep" -> {
@@ -365,10 +395,12 @@ public class CustomerFlow {
             }
             case "shipping" -> {
                 order.status().require(OrderStatus.QUOTE_READY, OrderStatus.REVIEW_REQUIRED);
+                dialogs.clear(user, user);
                 messages.receiving(user, order);
             }
             case "pickupList" -> {
                 order.status().require(OrderStatus.QUOTE_READY, OrderStatus.REVIEW_REQUIRED);
+                dialogs.clear(user, user);
                 for (ReceivingPoints.Point point : ReceivingPoints.ALL) {
                     messages.buttons(user, point.label() + "\n" + point.address() + "\n\nСамовывоз бесплатный.", List.of(
                             Map.of("text", "ссылка на адрес", "url", point.mapUrl()),
@@ -412,6 +444,9 @@ public class CustomerFlow {
     public boolean input(long user, String text, long replyTo) {
         BotDialog dialog = dialogs.get(user, user);
         UUID replyOrder = dialogs.replyOrder(user, replyTo);
+        if (replyOrder != null && dialog != null && !replyOrder.equals(dialog.orderId())) {
+            throw new BusinessException("Ответ относится к другому заказу. Открой нужный заказ и нажми «Написать сообщение».");
+        }
         if (replyOrder != null && dialog == null) {
             modeling.question(user, replyOrder, text);
             return true;

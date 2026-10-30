@@ -449,6 +449,11 @@ public class OrderService {
         requireAdmin(admin);
         orders.lock();
         PrintOrder order = orders.byNumber(number);
+        if (order.deleted()) throw new BusinessException("Заказ удалён. Сначала восстановите его.");
+        DeliveryDetails delivery = deliveries.get(order.id());
+        if (status == OrderStatus.SHIPPED && delivery != null && delivery.method().equals("SELF_PICKUP")) {
+            throw new BusinessException("Для самовывоза выберите «Выполнен» после выдачи заказа клиенту.");
+        }
         if (order.status() == status) {
             return;
         }
@@ -684,7 +689,14 @@ public class OrderService {
         switch (status) {
             case ESTIMATING -> { return; }
             case PRINTING -> text += " в работе.";
-            case READY -> text += " готов к отправке.";
+            case READY -> {
+                DeliveryDetails delivery = deliveries.get(order.id());
+                if (delivery != null && delivery.method().equals("SELF_PICKUP")) {
+                    text += " готов к самовывозу. Согласуй время получения с командой PrintLab.";
+                } else {
+                    text += " готов к отправке.";
+                }
+            }
             case SHIPPED -> text += " отправлен СДЭК.";
             case COMPLETED -> text += " выполнен. Спасибо, что выбрал PrintLab!";
             case CANCELLED -> text += " отменён.";

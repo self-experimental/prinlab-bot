@@ -20,7 +20,8 @@ import java.util.Set;
 
 @Component
 public class TelegramHttpGateway implements TelegramGateway {
-    private static final Set<String> OUTGOING = Set.of("sendMessage", "sendDocument", "sendPhoto", "answerCallbackQuery", "setMyCommands", "setChatMenuButton");
+    private static final Set<String> OUTGOING = Set.of("sendMessage", "sendDocument", "sendPhoto", "answerCallbackQuery", "setMyCommands", "setChatMenuButton",
+            "setMyShortDescription", "setMyDescription");
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private final AppProperties properties;
     private final Json json;

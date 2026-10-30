@@ -222,7 +222,10 @@ public class OperatorPanel {
             case PAID -> buttons.add(button("В работе", "op:to_PRINTING:" + order.id()));
             case PRINTING, QUALITY_CHECK -> buttons.add(button("Готов к отправке", "op:to_READY:" + order.id()));
             case READY -> {
-                buttons.add(button("Отправлен", "op:to_SHIPPED:" + order.id()));
+                DeliveryDetails delivery = deliveries.get(order.id());
+                if (delivery == null || !delivery.method().equals("SELF_PICKUP")) {
+                    buttons.add(button("Отправлен", "op:to_SHIPPED:" + order.id()));
+                }
                 buttons.add(button("Выполнен", "op:to_COMPLETED:" + order.id()));
             }
             case SHIPPED -> buttons.add(button("Выполнен", "op:to_COMPLETED:" + order.id()));
@@ -243,6 +246,9 @@ public class OperatorPanel {
         String text = message.path("text").asText("").trim();
         BotDialog dialog = dialogs.get(user, chat);
         UUID replyOrder = dialogs.replyOrder(chat, message.path("reply_to_message").path("message_id").asLong());
+        if (replyOrder != null && dialog != null && !replyOrder.equals(dialog.orderId()) && !text.startsWith("/")) {
+            throw new BusinessException("Ответ относится к другому заказу. Откройте нужную карточку и нажмите «Ответить клиенту».");
+        }
         if (replyOrder != null && chat < 0 && dialog == null && !text.startsWith("/")) {
             sendReply(user, chat, replyOrder, message, false);
             return true;

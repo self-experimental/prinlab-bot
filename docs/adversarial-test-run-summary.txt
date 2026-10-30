@@ -1,0 +1,12 @@
+PrintLab 1.3.1 — 30.10.2026
+
+H2
+[INFO] Tests run: 125, Failures: 0, Errors: 0, Skipped: 3
+[INFO] BUILD SUCCESS
+[INFO] Finished at: 2026-10-30T14:37:16+03:00
+
+PostgreSQL
+[INFO] Tests run: 125, Failures: 0, Errors: 0, Skipped: 3
+[INFO] BUILD SUCCESS
+[INFO] Finished at: 2026-10-30T14:37:43+03:00
+
