@@ -191,13 +191,13 @@ class ApprovalPricingWorkflowTest extends BotTestSupport {
                 .anyMatch(p -> p.contains("Новый заказ") && p.contains("orders") && p.contains("Поддержка"));
         for (String payload : jdbc.sql("SELECT payload FROM outbox WHERE method = 'setMyShortDescription'").query(String.class).list()) {
             String text = json.read(payload, tools.jackson.databind.JsonNode.class).path("short_description").asText();
-            assertThat(text).isEqualTo("3D-печать на заказ. Присылай STL для расчёта или фото для создания модели.");
+            assertThat(text).isEqualTo("Печатаем ваши идеи пластиком.\nОт 3D-модели до готовой детали — с доставкой до двери.");
             assertThat(text.length()).isLessThanOrEqualTo(120);
         }
         assertThat(jdbc.sql("SELECT COUNT(*) FROM outbox WHERE method = 'setMyShortDescription'").query(Long.class).single()).isEqualTo(2);
         for (String payload : jdbc.sql("SELECT payload FROM outbox WHERE method = 'setMyDescription'").query(String.class).list()) {
             String text = json.read(payload, tools.jackson.databind.JsonNode.class).path("description").asText();
-            assertThat(text).contains("СДЭК", "бесплатный самовывоз");
+            assertThat(text).isEqualTo("Печатаем ваши идеи пластиком.\nОт 3D-модели до готовой детали — с доставкой до двери.");
             assertThat(text.length()).isLessThanOrEqualTo(512);
         }
         assertThat(count("orders")).isZero();
