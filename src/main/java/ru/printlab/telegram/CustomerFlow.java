@@ -30,9 +30,10 @@ public class CustomerFlow {
     private final Clock clock;
     private final IntakeDao intake;
     private final ru.printlab.catalog.CustomColorService customColors;
+    private final DeliveryDao deliveries;
 
     public CustomerFlow(OrderService service, OrderDao orders, ModelingService modeling, ColorService colors,
-                        Notifications messages, DialogDao dialogs, Json json, Clock clock, IntakeDao intake, ru.printlab.catalog.CustomColorService customColors) {
+                        Notifications messages, DialogDao dialogs, Json json, Clock clock, IntakeDao intake, ru.printlab.catalog.CustomColorService customColors, DeliveryDao deliveries) {
         this.service = service;
         this.orders = orders;
         this.modeling = modeling;
@@ -43,6 +44,7 @@ public class CustomerFlow {
         this.clock = clock;
         this.intake = intake;
         this.customColors = customColors;
+        this.deliveries = deliveries;
     }
 
     public void home(long user) {
@@ -177,6 +179,10 @@ public class CustomerFlow {
             text += "\n\nСогласованная сумма: " + Money.format(orders.quote(order.quoteId()).snapshot().publicPrice().total());
         }
         List<Map<String, String>> buttons = new ArrayList<>();
+        DeliveryDetails delivery = deliveries.get(id);
+        if (order.status() == OrderStatus.READY && delivery != null && delivery.method().equals("SELF_PICKUP")) {
+            buttons.add(button("Согласовать время", "pickupTime:" + id));
+        }
         buttons.add(button("Написать сообщение", "question:" + id));
         if (order.status() == OrderStatus.MODELING) buttons.add(button("Добавить фото", "photos:" + id));
         if (canCancel(order)) {
@@ -384,6 +390,16 @@ public class CustomerFlow {
                 messages.buttons(user, "Напиши текстовое сообщение по заказу №" + order.number() + ". Команда PrintLab получит его и ответит тебе здесь.",
                         List.of(button("Назад к заказу", "show:" + id), button("В меню", "nav:home")));
             }
+            case "pickupTime" -> {
+                order.status().require(OrderStatus.READY);
+                DeliveryDetails delivery = deliveries.get(id);
+                if (delivery == null || !delivery.method().equals("SELF_PICKUP")) throw stale();
+                intake.clear(user);
+                dialogs.save(user, user, "CHAT", null, id, null);
+                messages.orderButtons(user, "Напиши, когда тебе удобно забрать заказ №" + order.number()
+                        + ". Команда PrintLab получит сообщение и согласует время здесь.",
+                        List.of(button("Назад к заказу", "show:" + id), button("В меню", "nav:home")), id);
+            }
             case "ship" -> {
                 order.status().require(OrderStatus.QUOTE_READY, OrderStatus.REVIEW_REQUIRED);
                 String method = part(parts, 2);
@@ -401,12 +417,16 @@ public class CustomerFlow {
             case "pickupList" -> {
                 order.status().require(OrderStatus.QUOTE_READY, OrderStatus.REVIEW_REQUIRED);
                 dialogs.clear(user, user);
+                StringBuilder text = new StringBuilder("Бесплатный самовывоз в Москве\n\n");
+                List<Map<String, String>> buttons = new ArrayList<>();
+                int number = 1;
                 for (ReceivingPoints.Point point : ReceivingPoints.ALL) {
-                    messages.buttons(user, point.label() + "\n" + point.address() + "\n\nСамовывоз бесплатный.", List.of(
-                            Map.of("text", "ссылка на адрес", "url", point.mapUrl()),
-                            button("Выбрать этот адрес", "pickup:" + order.id() + ":" + point.key())));
+                    text.append(number++).append(". ").append(point.label()).append("\n").append(point.address()).append("\n\n");
+                    buttons.add(button("Выбрать самовывоз " + point.location(), "pickup:" + id + ":" + point.key()));
+                    buttons.add(Map.of("text", "Ссылка на адрес " + point.location(), "url", point.mapUrl()));
                 }
-                messages.buttons(user, "Выбери удобный адрес. Время встречи согласуем после готовности заказа.", List.of(button("Назад", "shipping:" + id)));
+                text.append("Выбери удобный адрес. Время встречи согласуем после готовности заказа.");
+                messages.orderButtons(user, text.toString(), buttons, id);
             }
             case "pickup" -> {
                 service.selfPickup(user, id, part(parts, 2));

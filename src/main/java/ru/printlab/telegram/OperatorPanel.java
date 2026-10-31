@@ -154,6 +154,12 @@ public class OperatorPanel {
             case "deleteYes" -> { service.delete(user, id); dialogs.clear(user, chat); show(user, chat, id); }
             case "restore" -> { service.restore(user, id); show(user, chat, id); }
             case "status" -> statuses(chat, order);
+            case "requestDelivery" -> {
+                order.status().require(OrderStatus.REVIEW_REQUIRED, OrderStatus.QUOTE_READY);
+                if (order.quoteId() == null) throw new BusinessException("Сначала нужно рассчитать модель.");
+                messages.receiving(orders.telegramId(order.customerId()), order);
+                messages.text(chat, "Выбор способа получения отправлен клиенту.");
+            }
             case "paid" -> {
                 order.status().require(OrderStatus.AWAITING_PAYMENT);
                 dialogs.save(user, chat, "PAYMENT_CONFIRM", null, id, order.quoteId().toString());

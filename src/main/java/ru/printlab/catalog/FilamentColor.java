@@ -7,6 +7,13 @@ public record FilamentColor(UUID id, String name, String surface, String manufac
     public FilamentColor {
         // Saved quotes before 1.3 have no spool mass. Their material cost remains in the frozen snapshot.
         if (spoolWeightGrams == null) spoolWeightGrams = 1000;
+        if (surface != null) {
+            surface = switch (surface.trim().toLowerCase(java.util.Locale.ROOT)) {
+                case "матовая", "матовое", "матовый", "matte" -> "Матовый";
+                case "глянцевая", "глянцевое", "глянцевый", "glossy" -> "Глянцевый";
+                default -> surface.trim();
+            };
+        }
     }
 
     public FilamentColor(UUID id, String name, String surface, String manufacturer, String paletteNumber,

@@ -81,24 +81,54 @@ public class Notifications {
 
     public void operatorOrder(long chat, PrintOrder order, String text) {
         List<Map<String, String>> buttons = new ArrayList<>();
+        DeliveryDetails delivery = deliveries.get(order.id());
+        boolean pickup = delivery != null && delivery.method().equals("SELF_PICKUP");
+        switch (order.status()) {
+            case MODELING -> buttons.add(button("Передать готовый STL", "op:stl:" + order.id()));
+            case REVIEW_REQUIRED -> {
+                if (order.quoteId() != null) {
+                    if (delivery == null) {
+                        buttons.add(button("Запросить способ получения", "op:requestDelivery:" + order.id()));
+                    } else if (!order.quoteId().equals(delivery.pricedQuoteId()) || !pickup && delivery.externalPrice() == null) {
+                        if (pickup) {
+                            buttons.add(button("Уточнить самовывоз", "op:requestDelivery:" + order.id()));
+                        } else {
+                            buttons.add(button("Рассчитать стоимость доставки", "op:delivery:" + order.id()));
+                        }
+                    } else {
+                        String label = "Подтвердить цену с учётом доставки";
+                        if (pickup) label = "Подтвердить цену · самовывоз";
+                        buttons.add(button(label, "op:publish:" + order.id()));
+                    }
+                }
+            }
+            case AWAITING_PAYMENT -> buttons.add(button("Подтвердить оплату", "op:paid:" + order.id()));
+            case PAID -> buttons.add(button("Начать печать", "op:to_PRINTING:" + order.id()));
+            case PRINTING, QUALITY_CHECK -> {
+                String label = "Готов к отправке";
+                if (pickup) label = "Готов к самовывозу";
+                buttons.add(button(label, "op:to_READY:" + order.id()));
+            }
+            case READY -> {
+                if (pickup) buttons.add(button("Подтвердить выдачу", "op:to_COMPLETED:" + order.id()));
+                else buttons.add(button("Подтвердить отправку", "op:to_SHIPPED:" + order.id()));
+            }
+            case SHIPPED -> buttons.add(button("Завершить заказ", "op:to_COMPLETED:" + order.id()));
+            default -> { }
+        }
         buttons.add(button("Ответить клиенту", "op:reply:" + order.id()));
         buttons.add(button("Отправить фото", "op:photo:" + order.id()));
-        if (order.status() == OrderStatus.MODELING) {
-            buttons.add(button("Готовый STL", "op:stl:" + order.id()));
-        }
-        buttons.add(button("Изменить статус", "op:status:" + order.id()));
-        buttons.add(button("Открыть заказ", "op:open:" + order.id()));
-        if (order.status() == OrderStatus.REVIEW_REQUIRED && order.quoteId() != null) {
-            buttons.add(button("Подтвердить цену", "op:publish:" + order.id()));
-        }
         if (order.quoteId() != null && order.paidAt() == null && !order.deleted()
                 && List.of(OrderStatus.REVIEW_REQUIRED, OrderStatus.QUOTE_READY, OrderStatus.AWAITING_PAYMENT).contains(order.status()))
             buttons.add(button("Изменить цену печати", "op:price:" + order.id()));
-        DeliveryDetails delivery = deliveries.get(order.id());
-        if (delivery != null && !delivery.method().equals("SELF_PICKUP") && (order.status() == OrderStatus.QUOTE_READY || order.status() == OrderStatus.REVIEW_REQUIRED)) {
-            buttons.add(button("Указать стоимость доставки", "op:delivery:" + order.id()));
+        if (delivery != null && !pickup && delivery.externalPrice() != null && order.quoteId() != null && order.quoteId().equals(delivery.pricedQuoteId())
+                && (order.status() == OrderStatus.QUOTE_READY || order.status() == OrderStatus.REVIEW_REQUIRED)) {
+            buttons.add(button("Изменить стоимость доставки", "op:delivery:" + order.id()));
         }
-        if (order.paidAt() == null && order.status() != OrderStatus.CANCELLED) buttons.add(button("Отменить заказ", "op:cancel:" + order.id()));
+        buttons.add(button("Открыть заказ", "op:open:" + order.id()));
+        buttons.add(button("Другие действия со статусом", "op:status:" + order.id()));
+        if (order.paidAt() == null && order.status() != OrderStatus.CANCELLED && order.status() != OrderStatus.REFUNDED
+                && order.status() != OrderStatus.COMPLETED) buttons.add(button("Отменить заказ", "op:cancel:" + order.id()));
         buttons.add(button("Удалить заказ", "op:delete:" + order.id()));
         orderButtons(chat, text, buttons, order.id());
     }

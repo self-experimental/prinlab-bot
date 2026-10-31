@@ -40,6 +40,10 @@ class ApprovalPricingWorkflowTest extends BotTestSupport {
     @Test
     void retailUsesSpoolPriceAndNetMassWhileKeepingAllInternalCostsAndFrozenHistory() {
         PrintOrder black = draft(222);
+        assertThat(colors.get(BLACK).surface()).isEqualTo("Глянцевый");
+        assertThat(colors.get(BEIGE).surface()).isEqualTo("Матовый");
+        assertThat(colors.get(BLACK).label()).contains("глянцевый");
+        assertThat(jdbc.sql("SELECT surface FROM filament_colors WHERE id=?").param(BLACK).query(String.class).single()).isEqualTo("Глянцевый");
         Quote quote = estimate(222, black, grams("10", "60"));
         assertThat(quote.snapshot().publicPrice().regularPrintPrice()).isEqualByComparingTo("70");
         assertThat(quote.snapshot().costs().material()).isEqualByComparingTo("7");
@@ -122,10 +126,15 @@ class ApprovalPricingWorkflowTest extends BotTestSupport {
     void allThreePickupPointsAreFreeAndChangingFulfillmentWithdrawsPublishedOffer() {
         PrintOrder order = draft(222);
         Quote initial = estimate(222, order, Fixtures.estimate());
+        long before = jdbc.sql("SELECT COUNT(*) FROM outbox WHERE method='sendMessage'").query(Long.class).single();
         click(222, "pickupList:" + order.id());
+        assertThat(jdbc.sql("SELECT COUNT(*) FROM outbox WHERE method='sendMessage'").query(Long.class).single()).isEqualTo(before+1);
+        var menu = json.read(jdbc.sql("SELECT payload FROM outbox WHERE method='sendMessage' ORDER BY id DESC LIMIT 1").query(String.class).single(),tools.jackson.databind.JsonNode.class);
+        assertThat(menu.path("reply_markup").path("inline_keyboard").size()).isEqualTo(6);
+        assertThat(menu.path("text").asText()).contains("1. Метро Бауманская", "2. Метро Селигерская", "3. Метро Планерная");
         for (ReceivingPoints.Point point : ReceivingPoints.ALL) {
             assertThat(jdbc.sql("SELECT payload FROM outbox").query(String.class).list())
-                    .anyMatch(p -> p.contains(point.mapUrl()) && p.contains("ссылка на адрес"));
+                    .anyMatch(p -> p.contains(point.mapUrl()) && p.contains("Ссылка на адрес " + point.location()));
             service.selfPickup(222, order.id(), point.key());
             DeliveryDetails details = delivery.get(order.id());
             assertThat(details.address()).isEqualTo(point.address());
@@ -232,6 +241,47 @@ class ApprovalPricingWorkflowTest extends BotTestSupport {
             assertThat(restored.snapshot().publicPrice()).isEqualTo(current.snapshot().publicPrice());
             assertThat(service.summary(orders.get(order.id()))).contains("Чёрный");
         }
+    }
+
+    @Test
+    void operatorCardPrioritizesDeliveryApprovalPaymentAndProduction() {
+        PrintOrder order = draft(222);
+        assertThat(firstAction(order)).isEqualTo("op:reply:" + order.id());
+        service.submit(222, order.id());
+        Quote quote = service.estimate(111, order.number(), Fixtures.estimate());
+        assertThat(firstAction(order)).isEqualTo("op:requestDelivery:" + order.id());
+        click(111, -12345, "op:requestDelivery:" + order.id());
+        assertThat(messages(222)).contains("как получить заказ");
+        service.delivery(222, order.id(), "COURIER", "Тестовый Иван Иванович", "+79990000000", "Москва, Тестовая 1");
+        assertThat(firstAction(order)).isEqualTo("op:delivery:" + order.id());
+        click(111, -12345, "op:delivery:" + order.id());
+        group(111, Map.of("text", "350"));
+        assertThat(firstAction(order)).isEqualTo("op:publish:" + order.id());
+        click(111, -12345, "op:publish:" + order.id());
+        click(111, -12345, "op:publishConfirm:" + order.id());
+        assertThat(firstAction(order)).isEqualTo("op:reply:" + order.id());
+        service.accept(222, orders.get(order.id()).quoteId());
+        assertThat(firstAction(order)).isEqualTo("op:paid:" + order.id());
+        click(111, -12345, "op:paid:" + order.id());
+        assertThat(count("payments")).isZero();
+        click(111, -12345, "op:payConfirm:" + order.id());
+        group(111, Map.of("text", "PRIORITY-PAID"));
+        assertThat(firstAction(order)).isEqualTo("op:to_PRINTING:" + order.id());
+        click(111, -12345, "op:to_PRINTING:" + order.id());
+        assertThat(firstAction(order)).isEqualTo("op:to_READY:" + order.id());
+        click(111, -12345, "op:to_READY:" + order.id());
+        assertThat(firstAction(order)).isEqualTo("op:to_SHIPPED:" + order.id());
+        click(111, -12345, "op:to_SHIPPED:" + order.id());
+        assertThat(firstAction(order)).isEqualTo("op:to_COMPLETED:" + order.id());
+        click(111, -12345, "op:to_COMPLETED:" + order.id());
+        assertThat(orders.get(order.id()).status()).isEqualTo(OrderStatus.COMPLETED);
+        assertThat(firstAction(order)).isEqualTo("op:reply:" + order.id());
+    }
+
+    private String firstAction(PrintOrder order) {
+        click(111, -12345, "op:open:" + order.id());
+        String payload = jdbc.sql("SELECT payload FROM outbox WHERE method='sendMessage' ORDER BY id DESC LIMIT 1").query(String.class).single();
+        return json.read(payload, tools.jackson.databind.JsonNode.class).path("reply_markup").path("inline_keyboard").get(0).get(0).path("callback_data").asText();
     }
 
     private Quote estimate(long user, PrintOrder order, Estimate estimate) {

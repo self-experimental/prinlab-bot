@@ -223,8 +223,16 @@ class AdversarialWorkflowTest extends BotTestSupport {
   click(111,-12345,"op:to_SHIPPED:"+o.id());send(111,"/status "+o.number()+" SHIPPED");
   assertThat(orders.get(o.id()).status()).isEqualTo(OrderStatus.READY);
   assertThat(messages(222)).contains("готов к самовывозу").doesNotContain("отправлен СДЭК");
+  assertThat(jdbc.sql("SELECT payload FROM outbox WHERE method='sendMessage'").query(String.class).list()).anyMatch(p->p.contains("pickupTime:"+o.id()));
+  click(222,"pickupTime:"+o.id());send(222,"Заберу в субботу после 14:00");
+  assertThat(messages(-12345)).contains("Заберу в субботу после 14:00");
+  assertThat(orders.get(o.id()).status()).isEqualTo(OrderStatus.READY);
+  click(111,-12345,"op:open:"+o.id());
+  var pickupCard=json.read(jdbc.sql("SELECT payload FROM outbox WHERE method='sendMessage' ORDER BY id DESC LIMIT 1").query(String.class).single(),tools.jackson.databind.JsonNode.class);
+  assertThat(pickupCard.path("reply_markup").path("inline_keyboard").get(0).get(0).path("text").asText()).isEqualTo("Подтвердить выдачу");
   click(111,-12345,"op:to_COMPLETED:"+o.id());
   assertThat(orders.get(o.id()).status()).isEqualTo(OrderStatus.COMPLETED);
+  click(222,"nav:home");click(222,"pickupTime:"+o.id());assertThat(dialogs.get(222,222)).isNull();
  }
  @Test void deliveryMenuClearsExistingNameInput(){
   PrintOrder o=draft(222);service.submit(222,o.id());service.estimate(111,o.number(),Fixtures.estimate());

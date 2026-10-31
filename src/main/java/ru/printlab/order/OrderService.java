@@ -692,7 +692,10 @@ public class OrderService {
             case READY -> {
                 DeliveryDetails delivery = deliveries.get(order.id());
                 if (delivery != null && delivery.method().equals("SELF_PICKUP")) {
-                    text += " готов к самовывозу. Согласуй время получения с командой PrintLab.";
+                    text += " готов к самовывозу.\n\nСогласуй время получения с командой PrintLab.";
+                    notifications.orderButtons(orders.telegramId(order.customerId()), text, List.of(
+                            Notifications.button("Согласовать время", "pickupTime:" + order.id())), order.id());
+                    return;
                 } else {
                     text += " готов к отправке.";
                 }
